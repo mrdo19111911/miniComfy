@@ -1,0 +1,25 @@
+{
+    "pipestudio_version": "1.0.0",
+    "name": "TSP Pipeline (100 Points)",
+    "created": "2026-02-10T00:00:00Z",
+    "modified": "2026-02-10T00:00:00Z",
+    "nodes": [
+        {"id": "gen1", "type": "tsp_generate_points", "position": {"x": 50, "y": 250}, "params": {"num_points": 100}, "parent_id": null},
+        {"id": "dist1", "type": "tsp_distance_matrix", "position": {"x": 350, "y": 250}, "params": {}, "parent_id": null},
+        {"id": "greedy1", "type": "tsp_greedy", "position": {"x": 700, "y": 250}, "params": {}, "parent_id": null},
+        {"id": "opt1", "type": "tsp_2opt", "position": {"x": 1050, "y": 250}, "params": {"max_iterations": 100}, "parent_id": null},
+        {"id": "eval1", "type": "tsp_evaluate", "position": {"x": 1400, "y": 150}, "params": {}, "parent_id": null},
+        {"id": "map1", "type": "tsp_map_visualize", "position": {"x": 1400, "y": 350}, "params": {}, "parent_id": null}
+    ],
+    "edges": [
+        {"id": "e1", "source": "gen1", "source_port": "points", "target": "dist1", "target_port": "points"},
+        {"id": "e2", "source": "dist1", "source_port": "dist_matrix", "target": "greedy1", "target_port": "dist_matrix"},
+        {"id": "e3", "source": "greedy1", "source_port": "tour", "target": "opt1", "target_port": "tour"},
+        {"id": "e4", "source": "dist1", "source_port": "dist_matrix", "target": "opt1", "target_port": "dist_matrix"},
+        {"id": "e5", "source": "opt1", "source_port": "tour", "target": "eval1", "target_port": "tour"},
+        {"id": "e6", "source": "dist1", "source_port": "dist_matrix", "target": "eval1", "target_port": "dist_matrix"},
+        {"id": "e7", "source": "gen1", "source_port": "points", "target": "map1", "target_port": "points"},
+        {"id": "e8", "source": "opt1", "source_port": "tour", "target": "map1", "target_port": "tour"}
+    ],
+    "viewport": {"x": 0, "y": 0, "zoom": 0.8}
+}

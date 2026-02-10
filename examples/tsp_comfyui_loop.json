@@ -1,0 +1,31 @@
+{
+    "pipestudio_version": "1.0.0",
+    "name": "TSP 2-Opt Loop (ComfyUI style)",
+    "created": "2026-02-10T00:00:00Z",
+    "modified": "2026-02-10T00:00:00Z",
+    "nodes": [
+        {"id": "gen1",    "type": "tsp_generate_points", "position": {"x": 50,   "y": 200}, "params": {"num_points": 50}},
+        {"id": "dist1",   "type": "tsp_distance_matrix", "position": {"x": 300,  "y": 200}, "params": {}},
+        {"id": "greedy1", "type": "tsp_greedy",          "position": {"x": 550,  "y": 200}, "params": {}},
+        {"id": "ls1",     "type": "loop_start",          "position": {"x": 800,  "y": 200}, "params": {"iterations": 10}},
+        {"id": "opt1",    "type": "tsp_2opt",            "position": {"x": 1050, "y": 200}, "params": {"max_iterations": 50}},
+        {"id": "le1",     "type": "loop_end",            "position": {"x": 1300, "y": 200}, "params": {"pair_id": "ls1"}},
+        {"id": "eval1",   "type": "tsp_evaluate",        "position": {"x": 1550, "y": 150}, "params": {}},
+        {"id": "map1",    "type": "tsp_map_visualize",   "position": {"x": 1550, "y": 350}, "params": {}}
+    ],
+    "edges": [
+        {"id": "e1",  "source": "gen1",    "source_port": "points",      "target": "dist1",   "target_port": "points"},
+        {"id": "e2",  "source": "dist1",   "source_port": "dist_matrix", "target": "greedy1", "target_port": "dist_matrix"},
+        {"id": "e3",  "source": "dist1",   "source_port": "dist_matrix", "target": "ls1",     "target_port": "in_1"},
+        {"id": "e4",  "source": "greedy1", "source_port": "tour",        "target": "ls1",     "target_port": "in_2"},
+        {"id": "e5",  "source": "ls1",     "source_port": "out_1",       "target": "opt1",    "target_port": "dist_matrix"},
+        {"id": "e6",  "source": "ls1",     "source_port": "out_2",       "target": "opt1",    "target_port": "tour"},
+        {"id": "e7",  "source": "opt1",    "source_port": "dist_matrix", "target": "le1",     "target_port": "in_1"},
+        {"id": "e8",  "source": "opt1",    "source_port": "tour",        "target": "le1",     "target_port": "in_2"},
+        {"id": "e9",  "source": "le1",     "source_port": "out_2",       "target": "eval1",   "target_port": "tour"},
+        {"id": "e10", "source": "dist1",   "source_port": "dist_matrix", "target": "eval1",   "target_port": "dist_matrix"},
+        {"id": "e11", "source": "gen1",    "source_port": "points",      "target": "map1",    "target_port": "points"},
+        {"id": "e12", "source": "le1",     "source_port": "out_2",       "target": "map1",    "target_port": "tour"}
+    ],
+    "viewport": {"x": 0, "y": 0, "zoom": 0.7}
+}

@@ -1,0 +1,18 @@
+{
+    "pipestudio_version": "1.0.0",
+    "name": "Basic Sorting Demo",
+    "created": "2026-02-10T00:00:00Z",
+    "modified": "2026-02-10T00:00:00Z",
+    "nodes": [
+        {"id": "gen1", "type": "generate_array", "position": {"x": 50, "y": 200}, "params": {"size": 1000}, "parent_id": null},
+        {"id": "shuf1", "type": "shuffle_segment", "position": {"x": 350, "y": 100}, "params": {}, "parent_id": null},
+        {"id": "bp1", "type": "bubble_pass", "position": {"x": 650, "y": 200}, "params": {}, "parent_id": null},
+        {"id": "meas1", "type": "measure_disorder", "position": {"x": 950, "y": 200}, "params": {}, "parent_id": null}
+    ],
+    "edges": [
+        {"id": "e1", "source": "gen1", "source_port": "array", "target": "shuf1", "target_port": "array"},
+        {"id": "e2", "source": "shuf1", "source_port": "array", "target": "bp1", "target_port": "array"},
+        {"id": "e3", "source": "bp1", "source_port": "array", "target": "meas1", "target_port": "array"}
+    ],
+    "viewport": {"x": 0, "y": 0, "zoom": 1}
+}

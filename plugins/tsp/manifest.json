@@ -1,0 +1,13 @@
+{
+    "name": "tsp",
+    "version": "1.0.0",
+    "description": "Traveling Salesman Problem solver pipeline",
+    "author": "PipeStudio",
+    "categories": {
+        "INPUT": {"color": "#2563EB", "label": "Input"},
+        "COMPUTE": {"color": "#7C3AED", "label": "Compute"},
+        "SOLVER": {"color": "#D97706", "label": "Solver"},
+        "EVALUATION": {"color": "#0891B2", "label": "Evaluation"},
+        "UTILITY": {"color": "#6B7280", "label": "Utility"}
+    }
+}

@@ -1,0 +1,12 @@
+{
+    "name": "sorting",
+    "version": "1.0.0",
+    "description": "Sorting algorithm operators for demo and education",
+    "author": "PipeStudio",
+    "categories": {
+        "INPUT": {"color": "#2563EB", "label": "Input"},
+        "DESTROY": {"color": "#DC2626", "label": "Destroy"},
+        "REPAIR": {"color": "#D97706", "label": "Repair"},
+        "EVALUATION": {"color": "#0891B2", "label": "Evaluation"}
+    }
+}
