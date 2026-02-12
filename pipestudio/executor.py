@@ -565,6 +565,9 @@ class WorkflowExecutor:
                 summary[key] = value
             elif isinstance(value, (int, float, str, bool)):
                 summary[key] = value
+            elif callable(value):
+                name = getattr(value, '__name__', type(value).__name__)
+                summary[key] = {"_type": "function", "name": name}
             elif isinstance(value, (list, tuple)):
                 summary[key] = {
                     "_type": "list",

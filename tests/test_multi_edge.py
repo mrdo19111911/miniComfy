@@ -104,3 +104,66 @@ def test_single_edge_no_wrapping():
     # Single edge → value passed directly, not wrapped in list
     assert isinstance(stacker_input, np.ndarray)
     assert len(stacker_input) == 3
+
+
+def test_function_port_passes_callable():
+    """A FUNCTION port should pass callable objects between nodes."""
+    FUNC_PRODUCER_INFO = {
+        "type": "test_func_producer",
+        "label": "Func Producer",
+        "category": "TEST",
+        "ports_in": [],
+        "ports_out": [{"name": "func", "type": "FUNCTION"}],
+    }
+
+    FUNC_CONSUMER_INFO = {
+        "type": "test_func_consumer",
+        "label": "Func Consumer",
+        "category": "TEST",
+        "ports_in": [
+            {"name": "func", "type": "FUNCTION"},
+            {"name": "data", "type": "ARRAY"},
+        ],
+        "ports_out": [{"name": "result", "type": "ARRAY"}],
+    }
+
+    def my_transform(arr):
+        return arr * 2
+
+    def producer_exec(params, **inputs):
+        return {"func": my_transform}
+
+    def consumer_exec(params, **inputs):
+        fn = inputs["func"]
+        data = inputs["data"]
+        return {"result": fn(data)}
+
+    register_node(FUNC_PRODUCER_INFO, producer_exec)
+    register_node(FUNC_CONSUMER_INFO, consumer_exec)
+
+    try:
+        wf = WorkflowDefinition(
+            nodes=[
+                WorkflowNode(id="a", type="test_source_a", params={}),
+                WorkflowNode(id="fp", type="test_func_producer", params={}),
+                WorkflowNode(id="fc", type="test_func_consumer", params={}),
+            ],
+            edges=[
+                WorkflowEdge(id="e1", source="fp", source_port="func",
+                             target="fc", target_port="func"),
+                WorkflowEdge(id="e2", source="a", source_port="out",
+                             target="fc", target_port="data"),
+            ],
+        )
+
+        executor = WorkflowExecutor(wf)
+        results = executor.execute()
+
+        result = results["fc"]["result"]
+        expected = np.array([2.0, 4.0, 6.0])
+        np.testing.assert_array_equal(result, expected)
+    finally:
+        _NODE_REGISTRY.pop("test_func_producer", None)
+        _EXECUTORS.pop("test_func_producer", None)
+        _NODE_REGISTRY.pop("test_func_consumer", None)
+        _EXECUTORS.pop("test_func_consumer", None)
