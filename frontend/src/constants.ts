@@ -62,6 +62,8 @@ export function portColor(type: string): string {
       return '#FBBF24';
     case 'STRING':
       return '#A78BFA';
+    case 'FUNCTION':
+      return '#EC4899';
     default:
       return '#9CA3AF';
   }
