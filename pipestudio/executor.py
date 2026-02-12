@@ -85,15 +85,25 @@ class WorkflowExecutor:
         return order
 
     def _get_node_inputs(self, node_id: str, edges: List[WorkflowEdge]) -> Dict[str, Any]:
-        """Collect inputs for a node from upstream outputs."""
-        inputs = {}
+        """Collect inputs for a node from upstream outputs.
+
+        If multiple edges target the same port, values are collected into a list.
+        Single-edge ports receive the value directly (no wrapping).
+        """
+        edge_stacks: Dict[str, list] = {}
         for e in edges:
             if e.is_back_edge:
                 continue  # Back-edges handled by loop executor
             if e.target == node_id and e.source in self.node_outputs:
                 source_outputs = self.node_outputs[e.source]
                 if e.source_port in source_outputs:
-                    inputs[e.target_port] = source_outputs[e.source_port]
+                    if e.target_port not in edge_stacks:
+                        edge_stacks[e.target_port] = []
+                    edge_stacks[e.target_port].append(source_outputs[e.source_port])
+
+        inputs: Dict[str, Any] = {}
+        for port_name, values in edge_stacks.items():
+            inputs[port_name] = values[0] if len(values) == 1 else values
         return inputs
 
     # ------------------------------------------------------------------
@@ -258,10 +268,11 @@ class WorkflowExecutor:
 
                 node_logger._set_context(nid, node_def.type, self._log_handler)
                 try:
-                    node_inputs = self._get_node_inputs(nid, body_edges + [
-                        e for e in forward_edges
-                        if e.source == start_node.id and e.target in body_ids
-                    ])
+                    # body_edges may already contain start→body edges; deduplicate
+                    extra = [e for e in forward_edges
+                             if e.source == start_node.id and e.target in body_ids
+                             and e not in body_edges]
+                    node_inputs = self._get_node_inputs(nid, body_edges + extra)
                     if nid == end_node.id:
                         # loop_end is a pass-through
                         result = self.executors[node_def.type](node_def.params or {}, **node_inputs)
