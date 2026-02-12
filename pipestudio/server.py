@@ -12,8 +12,13 @@ from pydantic import BaseModel
 
 from pipestudio import __version__
 from pipestudio.models import WorkflowNode, WorkflowEdge, WorkflowDefinition
-from pipestudio.plugin_loader import load_plugins, reload_plugins, get_full_registry
+from pipestudio.plugin_loader import (
+    load_plugins, reload_plugins, get_full_registry,
+    activate_plugin, deactivate_plugin, delete_plugin,
+    _read_state_file, _write_state_file, _get_plugin_state,
+)
 from pipestudio.executor import WorkflowExecutor
+from pipestudio.hooks import run_hook
 
 # --- State ---
 
@@ -29,7 +34,7 @@ async def lifespan(app: FastAPI):
     global _manifests
     abs_plugins = os.path.abspath(PLUGINS_DIR)
     print(f"Loading plugins from: {abs_plugins}")
-    _manifests = load_plugins(abs_plugins)
+    _manifests = reload_plugins(abs_plugins)
     loaded = [m["name"] for m in _manifests if m.get("_loaded")]
     failed = [m["name"] for m in _manifests if not m.get("_loaded")]
     print(f"Plugins loaded: {loaded}")
@@ -203,26 +208,41 @@ def validate_workflow_endpoint(req: ExecuteRequest):
 
 @app.get("/api/workflow/examples")
 def list_examples():
-    """List available example workflows."""
+    """List available example workflows with availability info."""
     examples_dir = os.path.join(os.path.dirname(__file__), "..", "examples")
     if not os.path.exists(examples_dir):
         return []
+    registry = get_full_registry()
     result = []
     for f in sorted(os.listdir(examples_dir)):
         if f.endswith(".json"):
             path = os.path.join(examples_dir, f)
             with open(path, "r", encoding="utf-8") as fh:
                 data = json.load(fh)
-            result.append({"filename": f, "name": data.get("name", f)})
+            # Check which node types in the workflow are missing from registry
+            missing_nodes = set()
+            for node in data.get("nodes", []):
+                node_type = node.get("type", "")
+                if node_type and node_type not in registry and node_type != "loop_group":
+                    missing_nodes.add(node_type)
+            entry = {
+                "filename": f,
+                "name": data.get("name", f),
+                "available": len(missing_nodes) == 0,
+            }
+            if missing_nodes:
+                entry["missing_nodes"] = sorted(missing_nodes)
+            result.append(entry)
     return result
 
 
 @app.get("/api/workflow/example/{filename}")
 def load_example(filename: str):
     """Load a specific example workflow."""
-    if ".." in filename or "/" in filename or "\\" in filename:
+    safe_name = os.path.basename(filename)
+    if safe_name != filename or ".." in filename:
         raise HTTPException(400, "Invalid filename")
-    path = os.path.join(os.path.dirname(__file__), "..", "examples", filename)
+    path = os.path.join(os.path.dirname(__file__), "..", "examples", safe_name)
     if not os.path.exists(path):
         raise HTTPException(404, "Example not found")
     with open(path, "r", encoding="utf-8") as f:
@@ -231,17 +251,115 @@ def load_example(filename: str):
 
 @app.get("/api/plugins")
 def list_plugins():
-    """List loaded plugins and their status."""
+    """List plugins in hierarchical project → plugins format."""
     return [
         {
-            "name": m.get("name", "unknown"),
-            "version": m.get("version", "0.0.0"),
-            "description": m.get("description", ""),
+            "project": m.get("name", "unknown"),
+            "manifest": {
+                "name": m.get("name", "unknown"),
+                "version": m.get("version", "0.0.0"),
+                "description": m.get("description", ""),
+                "categories": m.get("categories", {}),
+            },
             "status": "ok" if m.get("_loaded") else "error",
             "error": m.get("_error"),
+            "plugins": m.get("_plugins", []),
         }
         for m in _manifests
     ]
+
+
+def _plugin_dir(project: str, plugin: str) -> str:
+    """Resolve plugin directory path for hooks."""
+    nodes_dir = os.path.join(os.path.abspath(PLUGINS_DIR), project, "nodes")
+    dir_path = os.path.join(nodes_dir, plugin)
+    if os.path.isdir(dir_path):
+        return dir_path
+    return nodes_dir
+
+
+# --- Plugin lifecycle: activate / deactivate / delete ---
+
+@app.post("/api/plugins/{project}/{plugin}/activate")
+def activate_single_plugin(project: str, plugin: str):
+    """Activate a single plugin."""
+    global _manifests
+    plugin_id = f"{project}/{plugin}"
+    abs_plugins = os.path.abspath(PLUGINS_DIR)
+    try:
+        activate_plugin(abs_plugins, plugin_id)
+        run_hook(_plugin_dir(project, plugin), "on_activate")
+        _manifests = reload_plugins(abs_plugins)
+        return {"status": "activated", "id": plugin_id}
+    except FileNotFoundError:
+        raise HTTPException(404, f"Plugin '{plugin_id}' not found")
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@app.post("/api/plugins/{project}/{plugin}/deactivate")
+def deactivate_single_plugin(project: str, plugin: str):
+    """Deactivate a single plugin."""
+    global _manifests
+    plugin_id = f"{project}/{plugin}"
+    abs_plugins = os.path.abspath(PLUGINS_DIR)
+    try:
+        run_hook(_plugin_dir(project, plugin), "on_deactivate")
+        deactivate_plugin(abs_plugins, plugin_id)
+        _manifests = reload_plugins(abs_plugins)
+        return {"status": "deactivated", "id": plugin_id}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@app.post("/api/plugins/{project}/activate")
+def activate_project(project: str):
+    """Activate all plugins in a project."""
+    global _manifests
+    abs_plugins = os.path.abspath(PLUGINS_DIR)
+    state = _read_state_file(abs_plugins)
+    # Remove inactive entries for this project
+    keys_to_remove = [k for k in state if k.startswith(f"{project}/")]
+    for k in keys_to_remove:
+        state.pop(k)
+    _write_state_file(abs_plugins, state)
+    _manifests = reload_plugins(abs_plugins)
+    return {"status": "activated", "project": project}
+
+
+@app.post("/api/plugins/{project}/deactivate")
+def deactivate_project(project: str):
+    """Deactivate all plugins in a project."""
+    global _manifests
+    abs_plugins = os.path.abspath(PLUGINS_DIR)
+    # Find all plugins in this project from current manifests
+    project_manifest = [m for m in _manifests if m.get("name") == project]
+    if not project_manifest:
+        raise HTTPException(404, f"Project '{project}' not found")
+    plugin_ids = [p["id"] for p in project_manifest[0].get("_plugins", [])]
+    state = _read_state_file(abs_plugins)
+    for pid in plugin_ids:
+        state[pid] = "inactive"
+    _write_state_file(abs_plugins, state)
+    _manifests = reload_plugins(abs_plugins)
+    return {"status": "deactivated", "project": project}
+
+
+@app.delete("/api/plugins/{project}/{plugin}")
+def delete_single_plugin(project: str, plugin: str):
+    """Delete a plugin from disk. Must be inactive first."""
+    global _manifests
+    plugin_id = f"{project}/{plugin}"
+    abs_plugins = os.path.abspath(PLUGINS_DIR)
+    try:
+        run_hook(_plugin_dir(project, plugin), "on_uninstall")
+        delete_plugin(abs_plugins, plugin_id)
+        _manifests = reload_plugins(abs_plugins)
+        return {"status": "deleted", "id": plugin_id}
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except FileNotFoundError:
+        raise HTTPException(404, f"Plugin '{plugin_id}' not found on disk")
 
 
 @app.post("/api/plugins/install")
@@ -269,16 +387,23 @@ async def install_plugin(file: UploadFile = File(...)):
     manifest = json.loads(zf.read(manifest_path))
     plugin_name = manifest.get("name", "unknown")
 
+    # Zip Slip protection: reject ZIPs with absolute or traversal paths
+    plugins_root = os.path.normpath(os.path.abspath(PLUGINS_DIR))
+    for member in zf.namelist():
+        if member.startswith("/") or member.startswith("\\") or ".." in member:
+            raise HTTPException(400, f"Unsafe path in ZIP: {member}")
+
     # Extract to plugins directory
-    plugin_dir = os.path.join(os.path.abspath(PLUGINS_DIR), plugin_name)
+    plugin_dir = os.path.normpath(os.path.join(plugins_root, plugin_name))
     os.makedirs(plugin_dir, exist_ok=True)
 
-    # Extract files, stripping top-level directory if present
     prefix = manifest_path.rsplit("manifest.json", 1)[0]
     for member in zf.namelist():
         if member.startswith(prefix) and not member.endswith("/"):
             rel_path = member[len(prefix):]
-            target = os.path.join(plugin_dir, rel_path)
+            target = os.path.normpath(os.path.join(plugin_dir, rel_path))
+            if not target.startswith(plugin_dir + os.sep) and target != plugin_dir:
+                raise HTTPException(400, f"Unsafe path in ZIP: {member}")
             os.makedirs(os.path.dirname(target), exist_ok=True)
             with open(target, "wb") as f:
                 f.write(zf.read(member))
@@ -289,23 +414,6 @@ async def install_plugin(file: UploadFile = File(...)):
 
     return {"status": "installed", "name": plugin_name, "message": f"Plugin '{plugin_name}' installed and loaded."}
 
-
-@app.delete("/api/plugins/{plugin_name}")
-def remove_plugin(plugin_name: str):
-    """Remove a plugin by name."""
-    import shutil
-    if ".." in plugin_name or "/" in plugin_name or "\\" in plugin_name:
-        raise HTTPException(400, "Invalid plugin name")
-    plugin_dir = os.path.join(os.path.abspath(PLUGINS_DIR), plugin_name)
-    if not os.path.exists(plugin_dir):
-        raise HTTPException(404, "Plugin not found")
-    shutil.rmtree(plugin_dir)
-
-    # Hot-reload: refresh registries after removal
-    global _manifests
-    _manifests = reload_plugins(os.path.abspath(PLUGINS_DIR))
-
-    return {"status": "removed", "name": plugin_name}
 
 
 @app.post("/api/plugins/reload")

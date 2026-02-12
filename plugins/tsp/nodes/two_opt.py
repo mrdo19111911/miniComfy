@@ -1,29 +1,29 @@
 """TSP node: 2-opt local search improvement."""
 import numpy as np
-from pipestudio.plugin_api import node, Port, logger
+from pipestudio.plugin_api import logger
+
+NODE_INFO = {
+    "type": "tsp_2opt",
+    "label": "2-Opt Local Search",
+    "category": "SOLVER",
+    "description": "Improve tour with 2-opt swaps",
+    "doc": "Iteratively reverses tour segments to reduce total length.",
+    "ports_in": [
+        {"name": "dist_matrix", "type": "ARRAY"},
+        {"name": "tour", "type": "ARRAY"},
+        {"name": "max_iterations", "type": "NUMBER", "default": 100},
+    ],
+    "ports_out": [
+        {"name": "tour", "type": "ARRAY"},
+        {"name": "tour_length", "type": "NUMBER"},
+        {"name": "improvement", "type": "NUMBER"},
+    ],
+}
 
 
-@node(
-    type="tsp_2opt",
-    label="2-Opt Local Search",
-    category="SOLVER",
-    description="Improve tour with 2-opt swaps",
-    doc="Iteratively reverses tour segments to reduce total length.",
-    ports_in=[
-        Port("dist_matrix", "ARRAY"),
-        Port("tour", "ARRAY"),
-        Port("max_iterations", "NUMBER", default=100),
-    ],
-    ports_out=[
-        Port("tour", "ARRAY"),
-        Port("tour_length", "NUMBER"),
-        Port("improvement", "NUMBER"),
-    ],
-)
-def tsp_2opt(params, **inputs):
-    dist_matrix = inputs["dist_matrix"]
-    tour = inputs["tour"].copy()
-    max_iter = int(params.get("max_iterations", 100))
+def run(dist_matrix, tour, max_iterations=100):
+    tour = tour.copy()
+    max_iter = int(max_iterations)
     n = len(tour)
 
     def tour_length(t):
@@ -51,8 +51,4 @@ def tsp_2opt(params, **inputs):
     improvement = initial_length - best_length
     pct = (improvement / initial_length) * 100 if initial_length > 0 else 0
     logger.info(f"{initial_length:.2f} -> {best_length:.2f} (-{pct:.1f}%, {iteration + 1} iters)")
-    return {
-        "tour": tour,
-        "tour_length": float(best_length),
-        "improvement": float(improvement),
-    }
+    return tour, float(best_length), float(improvement)

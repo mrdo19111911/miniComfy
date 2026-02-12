@@ -42,7 +42,7 @@ import { ErrorTracePanel, type ErrorTraceInfo } from './components/ErrorTracePan
 import { PluginManager } from './components/PluginManager';
 import { StatusBar } from './components/StatusBar';
 import { HelpPanel } from './components/HelpPanel';
-import type { PaletteNode } from './types';
+import type { PaletteNode, PortSpec, NodeVisualState, ProjectInfo } from './types';
 
 // ---------------------------------------------------------------------------
 // Node type registry
@@ -94,6 +94,7 @@ interface SavedWorkflow {
     target: string;
     sourceHandle?: string | null;
     targetHandle?: string | null;
+    is_back_edge?: boolean;
   }>;
 }
 
@@ -108,7 +109,7 @@ function downloadJson(data: unknown, filename: string) {
 }
 
 function openFilePicker(): Promise<string | null> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = '.json';
@@ -117,6 +118,8 @@ function openFilePicker(): Promise<string | null> {
       if (!file) return resolve(null);
       const reader = new FileReader();
       reader.onload = () => resolve(reader.result as string);
+      reader.onerror = () => reject(new Error('Failed to read file'));
+      reader.onabort = () => resolve(null);
       reader.readAsText(file);
     };
     input.click();
@@ -137,22 +140,73 @@ export default function WorkflowCanvas() {
     try {
       const res = await fetch(`${API_BASE}/api/workflow/nodes`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const registry: Record<string, any> = await res.json();
+      const registry: Record<string, Record<string, unknown>> = await res.json();
       setNodeRegistry(
-        Object.values(registry).map((spec: any) => ({
-          type: spec.type,
-          label: spec.label,
-          category: spec.category,
-          description: spec.description || '',
-          doc: spec.doc || '',
-          inputs: spec.inputs || [],
-          outputs: spec.outputs || [],
+        Object.values(registry).map((spec) => ({
+          type: spec.type as string,
+          label: spec.label as string,
+          category: spec.category as string,
+          description: (spec.description as string) || '',
+          doc: (spec.doc as string) || '',
+          inputs: (spec.inputs as PaletteNode['inputs']) || [],
+          outputs: (spec.outputs as PaletteNode['outputs']) || [],
         })),
       );
     } catch {
       fetchNodeRegistry().then(setNodeRegistry);
     }
   }, []);
+
+  // Check visual states of all canvas nodes against registry & plugin states
+  const checkNodeStates = useCallback(async () => {
+    try {
+      const [registryRes, pluginsRes] = await Promise.all([
+        fetch(`${API_BASE}/api/workflow/nodes`),
+        fetch(`${API_BASE}/api/plugins`),
+      ]);
+      if (!registryRes.ok || !pluginsRes.ok) return;
+
+      const registry: Record<string, any> = await registryRes.json();
+      const projects: ProjectInfo[] = await pluginsRes.json();
+
+      // Build set of inactive node types
+      const inactiveTypes = new Set<string>();
+      for (const proj of projects) {
+        for (const plugin of proj.plugins) {
+          if (plugin.state === 'inactive') {
+            for (const nt of plugin.node_types) {
+              inactiveTypes.add(nt);
+            }
+          }
+        }
+      }
+
+      setNodes((nds) =>
+        nds.map((node) => {
+          const nodeType: string = node.data.nodeType ?? node.type ?? '';
+          // Skip control types that don't come from plugins
+          if (nodeType === 'loop_group' || nodeType === 'reroute') return node;
+
+          let visualState: NodeVisualState = 'normal';
+          if (node.data.muted) {
+            visualState = 'muted';
+          } else if (inactiveTypes.has(nodeType)) {
+            visualState = 'disabled';
+          } else if (nodeType && !(nodeType in registry)) {
+            visualState = 'broken';
+          }
+
+          if (node.data.visualState === visualState) return node;
+          return {
+            ...node,
+            data: { ...node.data, visualState },
+          };
+        }),
+      );
+    } catch {
+      // Silently fail — states will be checked again on next action
+    }
+  }, [setNodes]);
 
   // Fetch on mount (retry until API responds)
   useEffect(() => {
@@ -230,7 +284,9 @@ export default function WorkflowCanvas() {
   }, []);
 
   // ---- WebSocket ----
-  const { connected, on: wsOn } = useWebSocket(`ws://localhost:8500/ws/execution`);
+  const { connected, on: wsOn } = useWebSocket(
+    `${API_BASE.replace(/^http/, 'ws')}/ws/execution`,
+  );
 
   // Register WS event handlers
   useEffect(() => {
@@ -348,36 +404,10 @@ export default function WorkflowCanvas() {
     pushSnapshot(nodes, edges);
   }, [nodes, edges, pushSnapshot]);
 
-  // ---- Apply undo/redo result ----
-
-  const applySnapshot = useCallback(
-    (snap: { nodes: Node[]; edges: Edge[] } | null) => {
-      if (!snap) return;
-      setIgnore(true);
-      setNodes(
-        sortNodes(
-          snap.nodes.map((n) => ({
-            ...n,
-            data: { ...n.data, onConfigChange, onDelete: onDeleteNode },
-          })),
-        ),
-      );
-      setEdges(
-        snap.edges.map((e) => ({
-          ...e,
-          animated: true,
-          style: { stroke: '#34D399', strokeWidth: 2 },
-        })),
-      );
-      setIgnore(false);
-    },
-    [setNodes, setEdges, setIgnore],
-  );
-
   // ---- Config change handler (passed to nodes via data) ----
 
   const onConfigChange = useCallback(
-    (nodeId: string, name: string, value: number) => {
+    (nodeId: string, name: string, value: number | string) => {
       snapshot();
       setNodes((nds) =>
         nds.map((n) => {
@@ -422,6 +452,43 @@ export default function WorkflowCanvas() {
       });
     },
     [setNodes, setEdges, snapshot],
+  );
+
+  // ---- Stable refs for callbacks (used in applySnapshot to avoid stale closures) ----
+
+  const onConfigChangeRef = useRef(onConfigChange);
+  onConfigChangeRef.current = onConfigChange;
+  const onDeleteNodeRef = useRef(onDeleteNode);
+  onDeleteNodeRef.current = onDeleteNode;
+
+  // ---- Apply undo/redo result ----
+
+  const applySnapshot = useCallback(
+    (snap: { nodes: Node[]; edges: Edge[] } | null) => {
+      if (!snap) return;
+      setIgnore(true);
+      setNodes(
+        sortNodes(
+          snap.nodes.map((n) => ({
+            ...n,
+            data: {
+              ...n.data,
+              onConfigChange: onConfigChangeRef.current,
+              onDelete: onDeleteNodeRef.current,
+            },
+          })),
+        ),
+      );
+      setEdges(
+        snap.edges.map((e) => ({
+          ...e,
+          animated: true,
+          style: { stroke: '#34D399', strokeWidth: 2 },
+        })),
+      );
+      setIgnore(false);
+    },
+    [setNodes, setEdges, setIgnore],
   );
 
   // ---- Toggle mute on a node ----
@@ -536,9 +603,15 @@ export default function WorkflowCanvas() {
       const json = event.dataTransfer.getData('application/reactflow');
       if (!json) return;
 
-      const spec = JSON.parse(json);
-      const isLoopGroup = spec.type === 'loop_group';
-      const isNewLoopType = ['loop_start', 'loop_end', 'loop_node'].includes(spec.type);
+      let spec: Record<string, unknown>;
+      try {
+        spec = JSON.parse(json);
+      } catch {
+        return;
+      }
+      const specType = spec.type as string;
+      const isLoopGroup = specType === 'loop_group';
+      const isNewLoopType = ['loop_start', 'loop_end', 'loop_node'].includes(specType);
 
       let position = { x: event.clientX - 300, y: event.clientY - 80 };
       if (rfInstance) {
@@ -549,7 +622,7 @@ export default function WorkflowCanvas() {
       }
 
       const defaultConfig: Record<string, unknown> = {};
-      for (const port of spec.inputs ?? []) {
+      for (const port of (spec.inputs as PortSpec[]) ?? []) {
         if (port.type === 'NUMBER' && port.default != null) {
           defaultConfig[port.name] = port.default;
         }
@@ -571,11 +644,11 @@ export default function WorkflowCanvas() {
 
       // Map node type to ReactFlow component type
       const rfType = isLoopGroup ? 'loop_group'
-        : isNewLoopType ? spec.type  // loop_start, loop_end, loop_node
+        : isNewLoopType ? specType  // loop_start, loop_end, loop_node
         : 'workflow';
 
       const newNode: Node = {
-        id: `${spec.type}_${Date.now()}`,
+        id: `${specType}_${crypto.randomUUID().slice(0, 8)}`,
         type: rfType,
         position,
         ...(isLoopGroup ? { style: { width: 500, height: 300 } } : {}),
@@ -583,12 +656,12 @@ export default function WorkflowCanvas() {
           ? { parentNode: parentId, extent: 'parent' as const }
           : {}),
         data: {
-          label: spec.label,
-          color: spec.color,
+          label: spec.label as string,
+          color: spec.color as string,
           inputs: spec.inputs,
           outputs: spec.outputs,
-          nodeType: spec.type,
-          category: spec.category,
+          nodeType: specType,
+          category: spec.category as string,
           config: defaultConfig,
           onConfigChange,
           onDelete: onDeleteNode,
@@ -640,7 +713,7 @@ export default function WorkflowCanvas() {
               },
             };
           } else {
-            const { parentNode, extent, ...rest } = n as any;
+            const { parentNode: _p, extent: _e, ...rest } = n;
             return {
               ...rest,
               position: absPos,
@@ -673,7 +746,7 @@ export default function WorkflowCanvas() {
           label: 'Add Reroute After',
           onClick: () => {
             snapshot();
-            const rerouteId = `reroute_${Date.now()}`;
+            const rerouteId = `reroute_${crypto.randomUUID().slice(0, 8)}`;
             const newNode: Node = {
               id: rerouteId,
               type: 'reroute',
@@ -705,7 +778,7 @@ export default function WorkflowCanvas() {
           label: 'Add Reroute Node',
           onClick: () => {
             snapshot();
-            const rerouteId = `reroute_${Date.now()}`;
+            const rerouteId = `reroute_${crypto.randomUUID().slice(0, 8)}`;
             const newNode: Node = {
               id: rerouteId,
               type: 'reroute',
@@ -750,7 +823,7 @@ export default function WorkflowCanvas() {
         source_port: e.sourceHandle ?? 'array',
         target: e.target,
         target_port: e.targetHandle ?? 'array',
-        is_back_edge: !!(e.data as any)?.is_back_edge,
+        is_back_edge: !!(e.data as Record<string, unknown> | undefined)?.is_back_edge,
       })),
     };
   }, [nodes, edges]);
@@ -805,14 +878,14 @@ export default function WorkflowCanvas() {
       );
 
       setExecutionResult('Workflow executed successfully!');
-    } catch (err: any) {
+    } catch (err) {
       setNodes((nds) =>
         nds.map((n) => ({
           ...n,
           data: { ...n.data, status: n.data.status === 'completed' ? 'completed' : 'error' },
         })),
       );
-      setExecutionResult(`Error: ${err.message}`);
+      setExecutionResult(`Error: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setExecuting(false);
     }
@@ -821,12 +894,11 @@ export default function WorkflowCanvas() {
   // ---- Clear canvas ----
 
   const clearCanvas = useCallback(() => {
-    snapshot();
     setNodes([]);
     setEdges([]);
     setExecutionResult(null);
     clearHistory();
-  }, [setNodes, setEdges, snapshot, clearHistory]);
+  }, [setNodes, setEdges, clearHistory]);
 
   // ---- Validate workflow ----
 
@@ -842,13 +914,28 @@ export default function WorkflowCanvas() {
       const issues: ValidationIssue[] = await response.json();
       setValidationIssues(issues);
       setValidationVisible(true);
-    } catch (err: any) {
+    } catch (err) {
       setValidationIssues([
-        { level: 'error', node_id: null, message: `Validation failed: ${err.message}` },
+        { level: 'error', node_id: null, message: `Validation failed: ${err instanceof Error ? err.message : String(err)}` },
       ]);
       setValidationVisible(true);
     }
   }, [buildPayload]);
+
+  // ---- Broken nodes helpers ----
+
+  const hasBrokenNodes = nodes.some((n) => n.data.visualState === 'broken');
+
+  const removeBrokenNodes = useCallback(() => {
+    const brokenIds = new Set(
+      nodes.filter((n) => n.data.visualState === 'broken').map((n) => n.id),
+    );
+    if (brokenIds.size === 0) return;
+    setNodes((nds) => nds.filter((n) => !brokenIds.has(n.id)));
+    setEdges((eds) =>
+      eds.filter((e) => !brokenIds.has(e.source) && !brokenIds.has(e.target)),
+    );
+  }, [nodes, setNodes, setEdges]);
 
   // ---- Highlight node (scroll into view + select) ----
 
@@ -922,6 +1009,7 @@ export default function WorkflowCanvas() {
         target: e.target,
         sourceHandle: e.sourceHandle,
         targetHandle: e.targetHandle,
+        ...(e.data?.is_back_edge ? { is_back_edge: true } : {}),
       })),
     };
     downloadJson(saved, `pipestudio-workflow-${Date.now()}.json`);
@@ -937,22 +1025,33 @@ export default function WorkflowCanvas() {
           throw new Error('Invalid workflow file');
         }
 
-        // Restore nodes with callbacks reattached
-        const restoredNodes: Node[] = saved.nodes.map((n) => ({
-          id: n.id,
-          type: n.type,
-          position: n.position,
-          ...(n.parentNode ? { parentNode: n.parentNode, extent: 'parent' as const } : {}),
-          ...(n.style ? { style: n.style } : {}),
-          data: {
-            ...n.data,
-            onConfigChange,
-            onDelete: onDeleteNode,
-          },
-        }));
+        // Restore nodes with callbacks reattached and config defaults merged
+        const restoredNodes: Node[] = saved.nodes.map((n) => {
+          const defaultConfig: Record<string, unknown> = {};
+          const inputs = (n.data.inputs as PortSpec[]) ?? [];
+          for (const port of inputs) {
+            if (port.type === 'NUMBER' && port.default != null) {
+              defaultConfig[port.name] = port.default;
+            }
+          }
+          const config = { ...defaultConfig, ...(n.data.config as Record<string, unknown>) };
+          return {
+            id: n.id,
+            type: n.type,
+            position: n.position,
+            ...(n.parentNode ? { parentNode: n.parentNode, extent: 'parent' as const } : {}),
+            ...(n.style ? { style: n.style } : {}),
+            data: {
+              ...n.data,
+              config,
+              onConfigChange,
+              onDelete: onDeleteNode,
+            },
+          };
+        });
 
         const restoredEdges: Edge[] = saved.edges.map((e) => {
-          const isBack = !!(e as any).data?.is_back_edge;
+          const isBack = !!e.is_back_edge;
           return {
             id: e.id,
             source: e.source,
@@ -984,11 +1083,14 @@ export default function WorkflowCanvas() {
             rfInstance.setViewport(saved.viewport!);
           }, 50);
         }
-      } catch (err: any) {
-        setExecutionResult(`Load error: ${err.message}`);
+
+        // Check node states after loading (disabled/broken detection)
+        setTimeout(() => checkNodeStates(), 100);
+      } catch (err) {
+        setExecutionResult(`Load error: ${err instanceof Error ? err.message : String(err)}`);
       }
     },
-    [setNodes, setEdges, rfInstance, onConfigChange, onDeleteNode, clearHistory],
+    [setNodes, setEdges, rfInstance, onConfigChange, onDeleteNode, clearHistory, checkNodeStates],
   );
 
   const loadWorkflow = useCallback(async () => {
@@ -1012,10 +1114,11 @@ export default function WorkflowCanvas() {
           registryMap.set(n.type, n);
         }
 
-        const canvasNodes: Node[] = data.nodes.map((n: any) => {
-          const spec = registryMap.get(n.type);
-          const isLoop = n.type === 'loop_group';
-          const isNewLoop = ['loop_start', 'loop_end', 'loop_node'].includes(n.type);
+        const canvasNodes: Node[] = data.nodes.map((n: Record<string, unknown>) => {
+          const nType = n.type as string;
+          const spec = registryMap.get(nType);
+          const isLoop = nType === 'loop_group';
+          const isNewLoop = ['loop_start', 'loop_end', 'loop_node'].includes(nType);
           const defaultConfig: Record<string, unknown> = {};
           for (const port of spec?.inputs ?? []) {
             if (port.type === 'NUMBER' && port.default != null) {
@@ -1023,22 +1126,22 @@ export default function WorkflowCanvas() {
             }
           }
           // Merge defaults with saved params
-          const config = { ...defaultConfig, ...n.params };
+          const config = { ...defaultConfig, ...(n.params as Record<string, unknown>) };
 
           return {
-            id: n.id,
-            type: isLoop ? 'loop_group' : isNewLoop ? n.type : 'workflow',
-            position: n.position ?? { x: 0, y: 0 },
+            id: n.id as string,
+            type: isLoop ? 'loop_group' : isNewLoop ? nType : 'workflow',
+            position: (n.position as { x: number; y: number }) ?? { x: 0, y: 0 },
             ...(isLoop ? { style: { width: 500, height: 300 } } : {}),
             ...(n.parent_id
-              ? { parentNode: n.parent_id, extent: 'parent' as const }
+              ? { parentNode: n.parent_id as string, extent: 'parent' as const }
               : {}),
             data: {
-              label: spec?.label ?? n.type,
+              label: spec?.label ?? nType,
               color: categoryColor(spec?.category ?? ''),
               inputs: spec?.inputs ?? [],
               outputs: spec?.outputs ?? [],
-              nodeType: n.type,
+              nodeType: nType,
               category: spec?.category ?? '',
               config,
               onConfigChange,
@@ -1047,14 +1150,14 @@ export default function WorkflowCanvas() {
           };
         });
 
-        const canvasEdges: Edge[] = (data.edges ?? []).map((e: any) => {
+        const canvasEdges: Edge[] = (data.edges ?? []).map((e: Record<string, unknown>) => {
           const isBack = !!e.is_back_edge;
           return {
-            id: e.id,
-            source: e.source,
-            target: e.target,
-            sourceHandle: e.source_port,
-            targetHandle: e.target_port,
+            id: e.id as string,
+            source: e.source as string,
+            target: e.target as string,
+            sourceHandle: e.source_port as string | undefined,
+            targetHandle: e.target_port as string | undefined,
             ...(isBack
               ? {
                   type: 'back_edge',
@@ -1073,11 +1176,14 @@ export default function WorkflowCanvas() {
         setEdges(canvasEdges);
         setExecutionResult(`Loaded: ${data.name ?? filename}`);
         clearHistory();
-      } catch (err: any) {
-        setExecutionResult(`Load error: ${err.message}`);
+
+        // Check node states after loading (disabled/broken detection)
+        setTimeout(() => checkNodeStates(), 100);
+      } catch (err) {
+        setExecutionResult(`Load error: ${err instanceof Error ? err.message : String(err)}`);
       }
     },
-    [setNodes, setEdges, nodeRegistry, onConfigChange, onDeleteNode, clearHistory],
+    [setNodes, setEdges, nodeRegistry, onConfigChange, onDeleteNode, clearHistory, checkNodeStates],
   );
 
   // ---- Keyboard shortcuts ----
@@ -1105,6 +1211,12 @@ export default function WorkflowCanvas() {
         e.preventDefault();
         applySnapshot(redo());
       }
+      // Ctrl+A: Select All
+      if (mod && e.key === 'a') {
+        e.preventDefault();
+        setNodes((nds) => nds.map((n) => ({ ...n, selected: true })));
+        setEdges((eds) => eds.map((edge) => ({ ...edge, selected: true })));
+      }
       // F1: Help
       if (e.key === 'F1') {
         e.preventDefault();
@@ -1113,7 +1225,7 @@ export default function WorkflowCanvas() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [saveWorkflow, loadWorkflow, undo, redo, applySnapshot]);
+  }, [saveWorkflow, loadWorkflow, undo, redo, applySnapshot, setNodes, setEdges]);
 
   // ---- MiniMap color ----
 
@@ -1165,8 +1277,7 @@ export default function WorkflowCanvas() {
         onLoad={loadWorkflow}
         onLoadExample={loadExample}
         onToggleLog={() => setLogPanelVisible((v) => !v)}
-        onToggleValidation={() => setValidationVisible((v) => !v)}
-        onValidate={validateWorkflow}
+        onToggleValidation={() => { validateWorkflow(); setValidationVisible((v) => !v); }}
         onUndo={() => applySnapshot(undo())}
         onRedo={() => applySnapshot(redo())}
         onOpenPlugins={() => setPluginManagerVisible(true)}
@@ -1178,7 +1289,6 @@ export default function WorkflowCanvas() {
         validationVisible={validationVisible}
         validationErrors={validationIssues.filter((i) => i.level === 'error').length}
         logCount={logs.length}
-        connected={connected}
         executionResult={executionResult}
       />
 
@@ -1238,6 +1348,7 @@ export default function WorkflowCanvas() {
         <LogPanel
           logs={logs}
           onClear={() => setLogs([])}
+          onHighlightNode={highlightNode}
           visible={logPanelVisible}
         />
 
@@ -1246,6 +1357,8 @@ export default function WorkflowCanvas() {
           issues={validationIssues}
           onValidate={validateWorkflow}
           onHighlightNode={highlightNode}
+          onRemoveBrokenNodes={removeBrokenNodes}
+          hasBrokenNodes={hasBrokenNodes}
           visible={validationVisible}
         />
 
@@ -1293,7 +1406,7 @@ export default function WorkflowCanvas() {
       <PluginManager
         visible={pluginManagerVisible}
         onClose={() => setPluginManagerVisible(false)}
-        onReload={refetchRegistry}
+        onReload={async () => { await refetchRegistry(); await checkNodeStates(); }}
       />
 
       {/* Help Modal */}

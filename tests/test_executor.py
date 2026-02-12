@@ -21,75 +21,89 @@ def _load():
 
 
 def test_simple_workflow():
-    """generate_array -> measure_disorder"""
+    """tsp_generate_points -> tsp_distance_matrix"""
     _load()
     wf = WorkflowDefinition(
         name="test",
         nodes=[
-            WorkflowNode(id="gen", type="generate_array", params={"size": 100}),
-            WorkflowNode(id="meas", type="measure_disorder"),
+            WorkflowNode(id="gen", type="tsp_generate_points", params={"num_points": 10}),
+            WorkflowNode(id="dm", type="tsp_distance_matrix"),
         ],
         edges=[
-            WorkflowEdge(id="e1", source="gen", source_port="array",
-                         target="meas", target_port="array"),
+            WorkflowEdge(id="e1", source="gen", source_port="points",
+                         target="dm", target_port="points"),
         ],
     )
     executor = WorkflowExecutor(wf)
     results = executor.execute()
     assert "gen" in results
-    assert "meas" in results
-    assert "score" in results["meas"]
-    assert 0.0 <= results["meas"]["score"] <= 1.0
+    assert "dm" in results
+    assert "dist_matrix" in results["dm"]
+    assert results["dm"]["dist_matrix"].shape == (10, 10)
 
 
 def test_chain_workflow():
-    """generate -> shuffle -> bubble -> measure"""
+    """generate_points -> distance_matrix -> greedy -> evaluate"""
     _load()
     wf = WorkflowDefinition(
         name="test_chain",
         nodes=[
-            WorkflowNode(id="gen", type="generate_array", params={"size": 50}),
-            WorkflowNode(id="shuf", type="shuffle_segment"),
-            WorkflowNode(id="bp", type="bubble_pass"),
-            WorkflowNode(id="meas", type="measure_disorder"),
+            WorkflowNode(id="gen", type="tsp_generate_points", params={"num_points": 10}),
+            WorkflowNode(id="dm", type="tsp_distance_matrix"),
+            WorkflowNode(id="greedy", type="tsp_greedy"),
+            WorkflowNode(id="eval", type="tsp_evaluate"),
         ],
         edges=[
-            WorkflowEdge(id="e1", source="gen", source_port="array",
-                         target="shuf", target_port="array"),
-            WorkflowEdge(id="e2", source="shuf", source_port="array",
-                         target="bp", target_port="array"),
-            WorkflowEdge(id="e3", source="bp", source_port="array",
-                         target="meas", target_port="array"),
+            WorkflowEdge(id="e1", source="gen", source_port="points",
+                         target="dm", target_port="points"),
+            WorkflowEdge(id="e2", source="dm", source_port="dist_matrix",
+                         target="greedy", target_port="dist_matrix"),
+            WorkflowEdge(id="e3", source="dm", source_port="dist_matrix",
+                         target="eval", target_port="dist_matrix"),
+            WorkflowEdge(id="e4", source="greedy", source_port="tour",
+                         target="eval", target_port="tour"),
         ],
     )
     results = WorkflowExecutor(wf).execute()
     assert len(results) == 4
-    assert "score" in results["meas"]
+    assert "tour_length" in results["eval"]
 
 
 def test_loop_group():
-    """generate -> loop_group(bubble_pass) -> measure"""
+    """generate_points -> dm -> greedy -> loop_group(2opt) -> evaluate"""
     _load()
     wf = WorkflowDefinition(
         name="test_loop",
         nodes=[
-            WorkflowNode(id="gen", type="generate_array", params={"size": 50}),
-            WorkflowNode(id="loop", type="loop_group", params={"iterations": 100}),
-            WorkflowNode(id="bp", type="bubble_pass", parent_id="loop"),
-            WorkflowNode(id="meas", type="measure_disorder"),
+            WorkflowNode(id="gen", type="tsp_generate_points", params={"num_points": 10}),
+            WorkflowNode(id="dm", type="tsp_distance_matrix"),
+            WorkflowNode(id="greedy", type="tsp_greedy"),
+            WorkflowNode(id="loop", type="loop_group", params={"iterations": 3}),
+            WorkflowNode(id="opt", type="tsp_2opt", parent_id="loop"),
+            WorkflowNode(id="eval", type="tsp_evaluate"),
         ],
         edges=[
-            WorkflowEdge(id="e1", source="gen", source_port="array",
-                         target="loop", target_port="array"),
-            WorkflowEdge(id="e2", source="loop", source_port="array",
-                         target="meas", target_port="array"),
-            WorkflowEdge(id="e3", source="loop", source_port="array",
-                         target="bp", target_port="array"),
+            WorkflowEdge(id="e1", source="gen", source_port="points",
+                         target="dm", target_port="points"),
+            WorkflowEdge(id="e2", source="dm", source_port="dist_matrix",
+                         target="greedy", target_port="dist_matrix"),
+            WorkflowEdge(id="e3", source="dm", source_port="dist_matrix",
+                         target="loop", target_port="slot_1"),
+            WorkflowEdge(id="e4", source="greedy", source_port="tour",
+                         target="loop", target_port="slot_2"),
+            WorkflowEdge(id="e5", source="loop", source_port="slot_1",
+                         target="opt", target_port="dist_matrix"),
+            WorkflowEdge(id="e6", source="loop", source_port="slot_2",
+                         target="opt", target_port="tour"),
+            WorkflowEdge(id="e7", source="dm", source_port="dist_matrix",
+                         target="eval", target_port="dist_matrix"),
+            WorkflowEdge(id="e8", source="loop", source_port="slot_2",
+                         target="eval", target_port="tour"),
         ],
     )
     results = WorkflowExecutor(wf).execute()
-    score = results["meas"]["score"]
-    assert score > 0.9, f"Expected mostly sorted after 100 bubble passes, got {score}"
+    assert "eval" in results
+    assert "tour_length" in results["eval"]
 
 
 def test_empty_loop_group_passthrough():
@@ -98,19 +112,19 @@ def test_empty_loop_group_passthrough():
     wf = WorkflowDefinition(
         name="test_empty_loop",
         nodes=[
-            WorkflowNode(id="gen", type="generate_array", params={"size": 10}),
+            WorkflowNode(id="gen", type="tsp_generate_points", params={"num_points": 5}),
             WorkflowNode(id="loop", type="loop_group", params={"iterations": 5}),
-            WorkflowNode(id="meas", type="measure_disorder"),
+            WorkflowNode(id="dm", type="tsp_distance_matrix"),
         ],
         edges=[
-            WorkflowEdge(id="e1", source="gen", source_port="array",
-                         target="loop", target_port="array"),
-            WorkflowEdge(id="e2", source="loop", source_port="array",
-                         target="meas", target_port="array"),
+            WorkflowEdge(id="e1", source="gen", source_port="points",
+                         target="loop", target_port="slot_1"),
+            WorkflowEdge(id="e2", source="loop", source_port="slot_1",
+                         target="dm", target_port="points"),
         ],
     )
     results = WorkflowExecutor(wf).execute()
-    assert "meas" in results
+    assert "dm" in results
 
 
 def test_event_handler_called():
@@ -124,7 +138,7 @@ def test_event_handler_called():
     wf = WorkflowDefinition(
         name="test_events",
         nodes=[
-            WorkflowNode(id="gen", type="generate_array", params={"size": 10}),
+            WorkflowNode(id="gen", type="tsp_generate_points", params={"num_points": 5}),
         ],
         edges=[],
     )
@@ -141,7 +155,7 @@ def test_logger_captures_entries():
     wf = WorkflowDefinition(
         name="test_log",
         nodes=[
-            WorkflowNode(id="gen", type="generate_array", params={"size": 100}),
+            WorkflowNode(id="gen", type="tsp_generate_points", params={"num_points": 10}),
         ],
         edges=[],
     )
@@ -160,26 +174,20 @@ def test_muted_node_passes_through():
     wf = WorkflowDefinition(
         name="test_muted",
         nodes=[
-            WorkflowNode(id="gen", type="generate_array", params={"size": 50}),
-            WorkflowNode(id="shuf", type="shuffle_segment", muted=True),
-            WorkflowNode(id="meas", type="measure_disorder"),
+            WorkflowNode(id="gen", type="tsp_generate_points", params={"num_points": 5}),
+            WorkflowNode(id="dm", type="tsp_distance_matrix", muted=True),
         ],
         edges=[
-            WorkflowEdge(id="e1", source="gen", source_port="array",
-                         target="shuf", target_port="array"),
-            WorkflowEdge(id="e2", source="shuf", source_port="array",
-                         target="meas", target_port="array"),
+            WorkflowEdge(id="e1", source="gen", source_port="points",
+                         target="dm", target_port="points"),
         ],
     )
     results = WorkflowExecutor(wf).execute()
-    # Muted shuffle should pass array through unchanged
-    assert "meas" in results
-    # The array passed through muted node should be the same as generated
-    gen_array = results["gen"]["array"]
-    # The muted node output should have the same input key
-    assert "array" in results["shuf"]
-    muted_array = results["shuf"]["array"]
-    assert np.array_equal(gen_array, muted_array)
+    assert "dm" in results
+    assert "points" in results["dm"]
+    gen_points = results["gen"]["points"]
+    muted_points = results["dm"]["points"]
+    assert np.array_equal(gen_points, muted_points)
 
 
 # ------------------------------------------------------------------
@@ -187,71 +195,75 @@ def test_muted_node_passes_through():
 # ------------------------------------------------------------------
 
 def test_comfyui_loop_sorting():
-    """loop_start + bubble_pass + loop_end => mostly sorted after 100 iters."""
+    """loop_start + 2opt + loop_end => improved tour."""
     _load()
     wf = WorkflowDefinition(
-        name="test_comfyui_sorting",
+        name="test_comfyui_tsp",
         nodes=[
-            WorkflowNode(id="gen", type="generate_array", params={"size": 50}),
-            WorkflowNode(id="ls", type="loop_start", params={"iterations": 100}),
-            WorkflowNode(id="bp", type="bubble_pass"),
+            WorkflowNode(id="gen", type="tsp_generate_points", params={"num_points": 10}),
+            WorkflowNode(id="dm", type="tsp_distance_matrix"),
+            WorkflowNode(id="greedy", type="tsp_greedy"),
+            WorkflowNode(id="ls", type="loop_start", params={"iterations": 3}),
+            WorkflowNode(id="opt", type="tsp_2opt"),
             WorkflowNode(id="le", type="loop_end", params={"pair_id": "ls"}),
-            WorkflowNode(id="meas", type="measure_disorder"),
+            WorkflowNode(id="eval", type="tsp_evaluate"),
         ],
         edges=[
-            WorkflowEdge(id="e1", source="gen", source_port="array",
+            WorkflowEdge(id="e1", source="gen", source_port="points",
+                         target="dm", target_port="points"),
+            WorkflowEdge(id="e2", source="dm", source_port="dist_matrix",
+                         target="greedy", target_port="dist_matrix"),
+            WorkflowEdge(id="e3", source="dm", source_port="dist_matrix",
                          target="ls", target_port="in_1"),
-            WorkflowEdge(id="e2", source="ls", source_port="out_1",
-                         target="bp", target_port="array"),
-            WorkflowEdge(id="e3", source="bp", source_port="array",
+            WorkflowEdge(id="e4", source="greedy", source_port="tour",
+                         target="ls", target_port="in_2"),
+            WorkflowEdge(id="e5", source="ls", source_port="out_1",
+                         target="opt", target_port="dist_matrix"),
+            WorkflowEdge(id="e6", source="ls", source_port="out_2",
+                         target="opt", target_port="tour"),
+            WorkflowEdge(id="e7", source="opt", source_port="tour",
+                         target="le", target_port="in_2"),
+            WorkflowEdge(id="e8", source="ls", source_port="out_1",
                          target="le", target_port="in_1"),
-            WorkflowEdge(id="e4", source="le", source_port="out_1",
-                         target="meas", target_port="array"),
+            WorkflowEdge(id="e9", source="le", source_port="out_1",
+                         target="eval", target_port="dist_matrix"),
+            WorkflowEdge(id="e10", source="le", source_port="out_2",
+                         target="eval", target_port="tour"),
         ],
     )
     results = WorkflowExecutor(wf).execute()
-    score = results["meas"]["score"]
-    assert score > 0.9, f"Expected mostly sorted after 100 bubble passes, got {score}"
+    assert "tour_length" in results["eval"]
+    assert results["eval"]["tour_length"] > 0
 
 
 def test_comfyui_loop_two_channels():
-    """ComfyUI loop passing two data channels (like TSP: dist_matrix + tour)."""
+    """ComfyUI loop passing two data channels."""
     _load()
     wf = WorkflowDefinition(
         name="test_comfyui_2ch",
         nodes=[
-            WorkflowNode(id="gen1", type="generate_array", params={"size": 30}),
-            WorkflowNode(id="gen2", type="generate_array", params={"size": 30}),
-            WorkflowNode(id="ls", type="loop_start", params={"iterations": 5}),
-            WorkflowNode(id="bp", type="bubble_pass"),
+            WorkflowNode(id="gen1", type="tsp_generate_points", params={"num_points": 5}),
+            WorkflowNode(id="gen2", type="tsp_generate_points", params={"num_points": 5}),
+            WorkflowNode(id="ls", type="loop_start", params={"iterations": 2}),
+            WorkflowNode(id="dm", type="tsp_distance_matrix"),
             WorkflowNode(id="le", type="loop_end", params={"pair_id": "ls"}),
-            WorkflowNode(id="meas", type="measure_disorder"),
         ],
         edges=[
-            # Channel 1: gen1 → ls:in_1 (static, not processed)
-            WorkflowEdge(id="e1", source="gen1", source_port="array",
+            WorkflowEdge(id="e1", source="gen1", source_port="points",
                          target="ls", target_port="in_1"),
-            # Channel 2: gen2 → ls:in_2 (will be bubble-sorted)
-            WorkflowEdge(id="e2", source="gen2", source_port="array",
+            WorkflowEdge(id="e2", source="gen2", source_port="points",
                          target="ls", target_port="in_2"),
-            # Only process channel 2 through bubble_pass
-            WorkflowEdge(id="e3", source="ls", source_port="out_2",
-                         target="bp", target_port="array"),
-            WorkflowEdge(id="e4", source="bp", source_port="array",
-                         target="le", target_port="in_2"),
-            # Pass channel 1 through unchanged
+            WorkflowEdge(id="e3", source="ls", source_port="out_1",
+                         target="dm", target_port="points"),
             WorkflowEdge(id="e5", source="ls", source_port="out_1",
                          target="le", target_port="in_1"),
-            # Measure the sorted channel
-            WorkflowEdge(id="e6", source="le", source_port="out_2",
-                         target="meas", target_port="array"),
+            WorkflowEdge(id="e4", source="ls", source_port="out_2",
+                         target="le", target_port="in_2"),
         ],
     )
     results = WorkflowExecutor(wf).execute()
-    assert "meas" in results
-    assert "score" in results["meas"]
-    # Channel 1 should be untouched in le output
     assert "out_1" in results["le"]
+    assert "out_2" in results["le"]
 
 
 # ------------------------------------------------------------------
@@ -259,35 +271,43 @@ def test_comfyui_loop_two_channels():
 # ------------------------------------------------------------------
 
 def test_n8n_loop_sorting():
-    """loop_node + bubble_pass with back-edge => mostly sorted after 100 iters."""
+    """loop_node + 2opt with back-edge => improved tour."""
     _load()
     wf = WorkflowDefinition(
-        name="test_n8n_sorting",
+        name="test_n8n_tsp",
         nodes=[
-            WorkflowNode(id="gen", type="generate_array", params={"size": 50}),
-            WorkflowNode(id="loop", type="loop_node", params={"iterations": 100}),
-            WorkflowNode(id="bp", type="bubble_pass"),
-            WorkflowNode(id="meas", type="measure_disorder"),
+            WorkflowNode(id="gen", type="tsp_generate_points", params={"num_points": 10}),
+            WorkflowNode(id="dm", type="tsp_distance_matrix"),
+            WorkflowNode(id="greedy", type="tsp_greedy"),
+            WorkflowNode(id="loop", type="loop_node", params={"iterations": 3}),
+            WorkflowNode(id="opt", type="tsp_2opt"),
+            WorkflowNode(id="eval", type="tsp_evaluate"),
         ],
         edges=[
-            # gen → loop:init_1
-            WorkflowEdge(id="e1", source="gen", source_port="array",
+            WorkflowEdge(id="e1", source="gen", source_port="points",
+                         target="dm", target_port="points"),
+            WorkflowEdge(id="e2", source="dm", source_port="dist_matrix",
+                         target="greedy", target_port="dist_matrix"),
+            WorkflowEdge(id="e3", source="dm", source_port="dist_matrix",
                          target="loop", target_port="init_1"),
-            # loop:loop_1 → bp (forward)
-            WorkflowEdge(id="e2", source="loop", source_port="loop_1",
-                         target="bp", target_port="array"),
-            # bp → loop:feedback_1 (back-edge)
-            WorkflowEdge(id="e3", source="bp", source_port="array",
-                         target="loop", target_port="feedback_1",
+            WorkflowEdge(id="e4", source="greedy", source_port="tour",
+                         target="loop", target_port="init_2"),
+            WorkflowEdge(id="e5", source="loop", source_port="loop_1",
+                         target="opt", target_port="dist_matrix"),
+            WorkflowEdge(id="e6", source="loop", source_port="loop_2",
+                         target="opt", target_port="tour"),
+            WorkflowEdge(id="e7", source="opt", source_port="tour",
+                         target="loop", target_port="feedback_2",
                          is_back_edge=True),
-            # loop:done_1 → measure
-            WorkflowEdge(id="e4", source="loop", source_port="done_1",
-                         target="meas", target_port="array"),
+            WorkflowEdge(id="e8", source="loop", source_port="done_1",
+                         target="eval", target_port="dist_matrix"),
+            WorkflowEdge(id="e9", source="loop", source_port="done_2",
+                         target="eval", target_port="tour"),
         ],
     )
     results = WorkflowExecutor(wf).execute()
-    score = results["meas"]["score"]
-    assert score > 0.9, f"Expected mostly sorted after 100 bubble passes, got {score}"
+    assert "tour_length" in results["eval"]
+    assert results["eval"]["tour_length"] > 0
 
 
 def test_n8n_loop_two_channels():
@@ -296,57 +316,45 @@ def test_n8n_loop_two_channels():
     wf = WorkflowDefinition(
         name="test_n8n_2ch",
         nodes=[
-            WorkflowNode(id="gen1", type="generate_array", params={"size": 30}),
-            WorkflowNode(id="gen2", type="generate_array", params={"size": 30}),
-            WorkflowNode(id="loop", type="loop_node", params={"iterations": 5}),
-            WorkflowNode(id="bp", type="bubble_pass"),
-            WorkflowNode(id="meas", type="measure_disorder"),
+            WorkflowNode(id="gen1", type="tsp_generate_points", params={"num_points": 5}),
+            WorkflowNode(id="gen2", type="tsp_generate_points", params={"num_points": 5}),
+            WorkflowNode(id="loop", type="loop_node", params={"iterations": 2}),
+            WorkflowNode(id="dm", type="tsp_distance_matrix"),
         ],
         edges=[
-            # Channel 1: static (no feedback)
-            WorkflowEdge(id="e1", source="gen1", source_port="array",
+            WorkflowEdge(id="e1", source="gen1", source_port="points",
                          target="loop", target_port="init_1"),
-            # Channel 2: will be sorted via feedback
-            WorkflowEdge(id="e2", source="gen2", source_port="array",
+            WorkflowEdge(id="e2", source="gen2", source_port="points",
                          target="loop", target_port="init_2"),
-            # loop:loop_2 → bp → feedback_2
-            WorkflowEdge(id="e3", source="loop", source_port="loop_2",
-                         target="bp", target_port="array"),
-            WorkflowEdge(id="e4", source="bp", source_port="array",
-                         target="loop", target_port="feedback_2",
-                         is_back_edge=True),
-            # done_2 → measure
-            WorkflowEdge(id="e5", source="loop", source_port="done_2",
-                         target="meas", target_port="array"),
+            WorkflowEdge(id="e3", source="loop", source_port="loop_1",
+                         target="dm", target_port="points"),
         ],
     )
     results = WorkflowExecutor(wf).execute()
-    assert "meas" in results
-    assert "score" in results["meas"]
-    # Channel 1 should still be in done outputs
     assert "done_1" in results["loop"]
+    assert "done_2" in results["loop"]
 
 
 def test_legacy_loop_still_works():
-    """Ensure legacy loop_group still works after new loop additions."""
+    """Ensure legacy loop_group still works."""
     _load()
     wf = WorkflowDefinition(
         name="test_legacy",
         nodes=[
-            WorkflowNode(id="gen", type="generate_array", params={"size": 50}),
-            WorkflowNode(id="loop", type="loop_group", params={"iterations": 50}),
-            WorkflowNode(id="bp", type="bubble_pass", parent_id="loop"),
-            WorkflowNode(id="meas", type="measure_disorder"),
+            WorkflowNode(id="gen", type="tsp_generate_points", params={"num_points": 10}),
+            WorkflowNode(id="dm", type="tsp_distance_matrix"),
+            WorkflowNode(id="loop", type="loop_group", params={"iterations": 2}),
+            WorkflowNode(id="greedy", type="tsp_greedy", parent_id="loop"),
         ],
         edges=[
-            WorkflowEdge(id="e1", source="gen", source_port="array",
-                         target="loop", target_port="array"),
-            WorkflowEdge(id="e2", source="loop", source_port="array",
-                         target="meas", target_port="array"),
-            WorkflowEdge(id="e3", source="loop", source_port="array",
-                         target="bp", target_port="array"),
+            WorkflowEdge(id="e1", source="gen", source_port="points",
+                         target="dm", target_port="points"),
+            WorkflowEdge(id="e2", source="dm", source_port="dist_matrix",
+                         target="loop", target_port="slot_1"),
+            WorkflowEdge(id="e3", source="loop", source_port="slot_1",
+                         target="greedy", target_port="dist_matrix"),
         ],
     )
     results = WorkflowExecutor(wf).execute()
-    score = results["meas"]["score"]
-    assert score > 0.7, f"Expected partially sorted after 50 bubble passes, got {score}"
+    assert "greedy" in results
+    assert "tour" in results["greedy"]

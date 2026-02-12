@@ -8,10 +8,12 @@ export interface WsEvent {
   [key: string]: unknown;
 }
 
+type WsHandler = (data: WsEvent) => void;
+
 export function useWebSocket(url: string) {
   const wsRef = useRef<WebSocket | null>(null);
   const [connected, setConnected] = useState(false);
-  const handlersRef = useRef<Map<string, (data: WsEvent) => void>>(new Map());
+  const handlersRef = useRef<Map<string, Set<WsHandler>>>(new Map());
   const reconnectTimer = useRef<ReturnType<typeof setTimeout>>();
 
   const connect = useCallback(() => {
@@ -37,11 +39,15 @@ export function useWebSocket(url: string) {
     ws.onmessage = (msg) => {
       try {
         const data = JSON.parse(msg.data) as WsEvent;
-        const handler = handlersRef.current.get(data.event);
-        if (handler) handler(data);
-        // Also call wildcard handler if present
-        const wildcard = handlersRef.current.get('*');
-        if (wildcard) wildcard(data);
+        const handlers = handlersRef.current.get(data.event);
+        if (handlers) {
+          for (const h of handlers) h(data);
+        }
+        // Also call wildcard handlers if present
+        const wildcards = handlersRef.current.get('*');
+        if (wildcards) {
+          for (const h of wildcards) h(data);
+        }
       } catch (err) {
         console.warn('[WS] Failed to parse message:', err);
       }
@@ -50,12 +56,21 @@ export function useWebSocket(url: string) {
     wsRef.current = ws;
   }, [url]);
 
-  const on = useCallback((event: string, handler: (data: WsEvent) => void) => {
-    handlersRef.current.set(event, handler);
+  const on = useCallback((event: string, handler: WsHandler) => {
+    let set = handlersRef.current.get(event);
+    if (!set) {
+      set = new Set();
+      handlersRef.current.set(event, set);
+    }
+    set.add(handler);
   }, []);
 
-  const off = useCallback((event: string) => {
-    handlersRef.current.delete(event);
+  const off = useCallback((event: string, handler?: WsHandler) => {
+    if (handler) {
+      handlersRef.current.get(event)?.delete(handler);
+    } else {
+      handlersRef.current.delete(event);
+    }
   }, []);
 
   const send = useCallback((data: unknown) => {

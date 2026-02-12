@@ -14,6 +14,8 @@ set "BACKEND_PORT=8500"
 set "FRONTEND_PORT=5173"
 set "VENV_DIR=%PROJECT_DIR%venv"
 set "FRONTEND_DIR=%PROJECT_DIR%frontend"
+set "EMBED_DIR=%PROJECT_DIR%python_embed"
+set "USE_EMBED=0"
 
 :: --- Step 1: Kill existing processes on ports ---
 echo [1/5] Killing processes on ports %BACKEND_PORT% and %FRONTEND_PORT%...
@@ -40,6 +42,14 @@ echo [2/5] Finding Python...
 
 set "PYTHON_CMD="
 
+:: Check if embedded python exists first (priority if previously downloaded)
+if exist "%EMBED_DIR%\python.exe" (
+    echo       Found Portable Python in %EMBED_DIR%
+    set "PYTHON_CMD=%EMBED_DIR%\python.exe"
+    set "USE_EMBED=1"
+    goto :PYTHON_FOUND
+)
+
 :: Try py launcher with preferred versions
 for %%v in (3.11 3.12 3.13 3.10 3.14) do (
     if not defined PYTHON_CMD (
@@ -62,17 +72,68 @@ if not defined PYTHON_CMD (
     )
 )
 
+:: --- If Python NOT found, Download Portable Version ---
 if not defined PYTHON_CMD (
-    echo [ERROR] Python not found! Install Python 3.10+ from https://python.org
-    echo         Make sure to check "Add Python to PATH" during installation.
-    pause
-    exit /b 1
+    echo [WARN] System Python not found. Installing Portable Python...
+    
+    if not exist "%EMBED_DIR%" mkdir "%EMBED_DIR%"
+    
+    REM Download Python Embeddable
+    echo       Downloading Python 3.10.11 Embeddable...
+    powershell -Command "Invoke-WebRequest -Uri 'https://www.python.org/ftp/python/3.10.11/python-3.10.11-embed-amd64.zip' -OutFile '%EMBED_DIR%\python.zip'"
+    if !errorlevel! neq 0 ( exit /b 1 )
+    
+    REM Extract
+    echo       Extracting Python...
+    powershell -Command "Expand-Archive -Path '%EMBED_DIR%\python.zip' -DestinationPath '%EMBED_DIR%' -Force"
+    del "%EMBED_DIR%\python.zip"
+    
+    REM Configure .pth file to import site (enable pip)
+    echo       Configuring environment...
+    (
+        echo python310.zip
+        echo .
+        echo import site
+    ) > "%EMBED_DIR%\python310._pth"
+    
+    REM Download get-pip.py
+    echo       Downloading pip installer...
+    powershell -Command "Invoke-WebRequest -Uri 'https://bootstrap.pypa.io/get-pip.py' -OutFile '%EMBED_DIR%\get-pip.py'"
+    
+    REM Install pip
+    echo       Installing pip...
+    "%EMBED_DIR%\python.exe" "%EMBED_DIR%\get-pip.py" --no-warn-script-location
+    del "%EMBED_DIR%\get-pip.py"
+    
+    set "PYTHON_CMD=%EMBED_DIR%\python.exe"
+    set "USE_EMBED=1"
+    echo       Portable Python installed successfully.
 )
 
+:PYTHON_FOUND
 echo.
 
-:: --- Step 3: Setup Python venv + dependencies ---
-echo [3/5] Setting up Python virtual environment...
+:: --- Step 3: Setup Dependencies ---
+echo [3/5] Setting up Dependencies...
+
+if "%USE_EMBED%"=="1" goto :SETUP_EMBED
+goto :SETUP_SYSTEM
+
+:SETUP_EMBED
+echo       Using Portable Python (skipping venv)...
+    
+REM Install requirements directly into portable python
+echo       Installing Python dependencies...
+
+"%PYTHON_CMD%" -m pip install -r "%PROJECT_DIR%requirements.txt" --quiet --no-warn-script-location 2>nul
+if !errorlevel! neq 0 (
+    echo       [WARN] Retrying minimal install...
+    "%PYTHON_CMD%" -m pip install fastapi uvicorn pydantic numpy psutil python-multipart --quiet --no-warn-script-location 2>nul
+)
+goto :SETUP_DONE
+
+:SETUP_SYSTEM
+echo       Using System Python (creating venv)...
 
 if not exist "%VENV_DIR%\Scripts\activate.bat" (
     echo       Creating venv at %VENV_DIR%...
@@ -82,27 +143,29 @@ if not exist "%VENV_DIR%\Scripts\activate.bat" (
         pause
         exit /b 1
     )
-    echo       venv created.
-) else (
-    echo       venv already exists.
 )
 
-:: Activate venv
+REM Activate venv
 call "%VENV_DIR%\Scripts\activate.bat"
 
-:: Install/upgrade pip
+REM Install dependencies
 python -m pip install --upgrade pip --quiet 2>nul
-
-:: Install requirements
 echo       Installing Python dependencies...
 pip install -r "%PROJECT_DIR%requirements.txt" --quiet 2>nul
 if !errorlevel! neq 0 (
-    echo       [WARN] Some pip packages may have failed. Retrying without numba...
-    pip install fastapi uvicorn pydantic numpy psutil --quiet 2>nul
+    echo       [WARN] Retrying minimal install...
+    pip install fastapi uvicorn pydantic numpy psutil python-multipart --quiet 2>nul
 )
+goto :SETUP_DONE
 
-:: Also install test deps
-pip install pytest httpx --quiet 2>nul
+:SETUP_DONE
+
+:: Install test deps (common for both)
+if "%USE_EMBED%"=="1" (
+    "%PYTHON_CMD%" -m pip install pytest httpx --quiet --no-warn-script-location 2>nul
+) else (
+    pip install pytest httpx --quiet 2>nul
+)
 
 echo       Python dependencies ready.
 echo.
@@ -143,18 +206,21 @@ echo   Press Ctrl+C in either window to stop
 echo ============================================
 echo.
 
-:: Start backend in a new window
-start "PipeStudio Backend (port %BACKEND_PORT%)" cmd /k "cd /d "%PROJECT_DIR%" && call "%VENV_DIR%\Scripts\activate.bat" && python -m uvicorn pipestudio.server:app --host 127.0.0.1 --port %BACKEND_PORT% --reload"
+:: Start backend
+if "%USE_EMBED%"=="1" (
+    start "PipeStudio Backend (port %BACKEND_PORT%)" cmd /k "cd /d "%PROJECT_DIR%" && "%PYTHON_CMD%" -m uvicorn pipestudio.server:app --host 127.0.0.1 --port %BACKEND_PORT% --reload"
+) else (
+    start "PipeStudio Backend (port %BACKEND_PORT%)" cmd /k "cd /d "%PROJECT_DIR%" && call "%VENV_DIR%\Scripts\activate.bat" && python -m uvicorn pipestudio.server:app --host 127.0.0.1 --port %BACKEND_PORT% --reload"
+)
 
-:: Wait a moment for backend to start
+:: Wait for backend
 timeout /t 3 /nobreak >nul
 
-:: Start frontend in a new window
+:: Start frontend
 start "PipeStudio Frontend (port %FRONTEND_PORT%)" cmd /k "cd /d "%FRONTEND_DIR%" && npm run dev"
 
-:: Wait a moment then open browser
+:: Wait then open browser
 timeout /t 3 /nobreak >nul
-
 echo Opening browser...
 start "" "http://localhost:%FRONTEND_PORT%"
 

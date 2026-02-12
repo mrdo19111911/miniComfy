@@ -16,7 +16,7 @@ function LoopEndNodeInner({ id, data, selected }: NodeProps) {
 
   // Get all loop_start nodes on canvas for the dropdown
   const allNodes = useNodes();
-  const loopStarts = allNodes.filter((n) => (n.data as any)?.nodeType === 'loop_start');
+  const loopStarts = allNodes.filter((n) => (n.data as Record<string, unknown>)?.nodeType === 'loop_start');
 
   const statusBorder =
     status === 'running' ? '#FBBF24'
@@ -29,7 +29,7 @@ function LoopEndNodeInner({ id, data, selected }: NodeProps) {
     (val: string) => {
       if (data.onConfigChange) data.onConfigChange(id, 'pair_id', val);
     },
-    [id, data],
+    [id, data.onConfigChange],
   );
 
   return (
@@ -86,8 +86,8 @@ function LoopEndNodeInner({ id, data, selected }: NodeProps) {
             cursor: 'pointer', padding: '0 2px', fontSize: 16, lineHeight: 1,
             display: 'flex', alignItems: 'center',
           }}
-          onMouseEnter={(e) => { (e.target as HTMLElement).style.color = '#fff'; }}
-          onMouseLeave={(e) => { (e.target as HTMLElement).style.color = 'rgba(255,255,255,0.5)'; }}
+          onMouseEnter={(e) => { e.currentTarget.style.color = '#fff'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.color = 'rgba(255,255,255,0.5)'; }}
           title="Delete node"
         >×</button>
       </div>
@@ -109,7 +109,7 @@ function LoopEndNodeInner({ id, data, selected }: NodeProps) {
         >
           <option value="">-- select --</option>
           {loopStarts.map((n) => (
-            <option key={n.id} value={n.id}>{(n.data as any)?.label ?? n.id}</option>
+            <option key={n.id} value={n.id}>{((n.data as Record<string, unknown>)?.label as string) ?? n.id}</option>
           ))}
         </select>
       </div>

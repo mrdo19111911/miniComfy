@@ -5,21 +5,20 @@
 
 import { memo, useCallback } from 'react';
 import { Handle, Position, NodeResizer, type NodeProps } from 'reactflow';
-import type { PortSpec } from './types';
-import { portColor } from './constants';
+import DOMPurify from 'dompurify';
+import type { PortSpec, NodeVisualState } from './types';
+import { portColor, NODE_STATE_STYLES } from './constants';
 
 // ---------------------------------------------------------------------------
 // Config widget: inline number input for NUMBER-type ports
 // ---------------------------------------------------------------------------
 
 function ConfigWidget({
-  nodeId,
   portName,
   value,
   defaultValue,
   onChange,
 }: {
-  nodeId: string;
   portName: string;
   value: unknown;
   defaultValue: unknown;
@@ -70,6 +69,12 @@ function WorkflowNodeInner({ id, data, selected }: NodeProps) {
   const outputs: PortSpec[] = data.outputs ?? [];
   const status: string = data.status ?? 'idle';
   const muted: boolean = !!data.muted;
+  const visualState: NodeVisualState = data.visualState ?? (muted ? 'muted' : 'normal');
+
+  // Plugin lifecycle state styles
+  const stateStyle = (visualState === 'disabled' || visualState === 'broken')
+    ? NODE_STATE_STYLES[visualState]
+    : null;
 
   // Separate config (NUMBER) ports from data (ARRAY) ports
   const configPorts = inputs.filter((p) => p.type === 'NUMBER');
@@ -99,7 +104,9 @@ function WorkflowNodeInner({ id, data, selected }: NodeProps) {
               ? '#F59E0B'
               : null;
 
-  const borderColor = muted ? '#666' : (statusBorder ?? (selected ? '#fff' : color));
+  const borderColor = stateStyle
+    ? stateStyle.borderColor
+    : muted ? '#666' : (statusBorder ?? (selected ? '#fff' : color));
 
   const handleConfigChange = useCallback(
     (name: string, val: number) => {
@@ -107,18 +114,18 @@ function WorkflowNodeInner({ id, data, selected }: NodeProps) {
         data.onConfigChange(id, name, val);
       }
     },
-    [id, data],
+    [id, data.onConfigChange],
   );
 
   return (
     <div
       style={{
         background: '#2A2A2A',
-        border: `2px solid ${borderColor}`,
+        border: `2px ${stateStyle?.borderStyle ?? 'solid'} ${borderColor}`,
         borderRadius: 8,
         minWidth: configPorts.length > 0 ? 200 : 160,
         fontFamily: "'Inter', 'Segoe UI', sans-serif",
-        opacity: muted ? 0.5 : 1,
+        opacity: stateStyle?.opacity ?? (muted ? 0.5 : 1),
         position: 'relative',
         ...(hasVisualResult ? { width: '100%', height: '100%', display: 'flex', flexDirection: 'column' as const } : {}),
         boxShadow:
@@ -132,6 +139,13 @@ function WorkflowNodeInner({ id, data, selected }: NodeProps) {
                   ? `0 0 12px ${color}88`
                   : '0 2px 8px rgba(0,0,0,0.4)',
       }}
+      title={
+        visualState === 'disabled'
+          ? `Plugin inactive. Activate to use this node.`
+          : visualState === 'broken'
+            ? `Plugin not installed. Install to use this node.`
+            : undefined
+      }
     >
       {/* Resize handle — only for nodes with visual results (SVG, multiline text) */}
       {hasVisualResult && (
@@ -162,7 +176,7 @@ function WorkflowNodeInner({ id, data, selected }: NodeProps) {
       {/* Header */}
       <div
         style={{
-          background: muted ? '#555' : color,
+          background: stateStyle?.headerColor ?? (muted ? '#555' : color),
           padding: '6px 12px',
           borderRadius: '6px 6px 0 0',
           display: 'flex',
@@ -215,10 +229,22 @@ function WorkflowNodeInner({ id, data, selected }: NodeProps) {
               <rect x="4" y="5.5" width="6" height="3" rx="0.5" fill="#fff" />
             </svg>
           )}
+          {visualState === 'broken' && status === 'idle' && (
+            <svg width="14" height="14" viewBox="0 0 14 14" style={{ flexShrink: 0 }}>
+              <polygon points="7,1 13,12 1,12" fill="#EF4444" stroke="#7F1D1D" strokeWidth="0.5" />
+              <text x="7" y="10.5" textAnchor="middle" fill="#fff" fontSize="8" fontWeight="bold">!</text>
+            </svg>
+          )}
+          {visualState === 'disabled' && status === 'idle' && (
+            <svg width="14" height="14" viewBox="0 0 14 14" style={{ flexShrink: 0 }}>
+              <circle cx="7" cy="7" r="6" fill="none" stroke="#888" strokeWidth="1.5" />
+              <line x1="3" y1="7" x2="11" y2="7" stroke="#888" strokeWidth="1.5" />
+            </svg>
+          )}
           <span style={{ fontSize: 13, fontWeight: 600, color: '#fff', letterSpacing: 0.3 }}>
             {data.label}
           </span>
-          {muted && (
+          {muted && !stateStyle && (
             <span style={{
               fontSize: 9,
               background: 'rgba(0,0,0,0.4)',
@@ -228,6 +254,18 @@ function WorkflowNodeInner({ id, data, selected }: NodeProps) {
               fontWeight: 700,
             }}>
               MUTED
+            </span>
+          )}
+          {stateStyle && (
+            <span style={{
+              fontSize: 9,
+              background: stateStyle.badgeBg,
+              color: stateStyle.badgeColor,
+              padding: '1px 4px',
+              borderRadius: 3,
+              fontWeight: 700,
+            }}>
+              {stateStyle.badgeText}
             </span>
           )}
         </div>
@@ -250,8 +288,8 @@ function WorkflowNodeInner({ id, data, selected }: NodeProps) {
             display: 'flex',
             alignItems: 'center',
           }}
-          onMouseEnter={(e) => { (e.target as HTMLElement).style.color = '#fff'; }}
-          onMouseLeave={(e) => { (e.target as HTMLElement).style.color = 'rgba(255,255,255,0.5)'; }}
+          onMouseEnter={(e) => { e.currentTarget.style.color = '#fff'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.color = 'rgba(255,255,255,0.5)'; }}
           title="Delete node"
         >
           ×
@@ -262,7 +300,6 @@ function WorkflowNodeInner({ id, data, selected }: NodeProps) {
       {configPorts.map((port) => (
         <ConfigWidget
           key={port.name}
-          nodeId={id}
           portName={port.name}
           value={data.config?.[port.name]}
           defaultValue={port.default}
@@ -330,7 +367,7 @@ function WorkflowNodeInner({ id, data, selected }: NodeProps) {
               if (s.trimStart().startsWith('<svg')) {
                 return (
                   <div key={k} style={{ marginTop: 4, width: '100%' }}
-                    dangerouslySetInnerHTML={{ __html: s }} />
+                    dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(s, { USE_PROFILES: { svg: true } }) }} />
                 );
               }
               if (typeof v === 'string' && v.includes('\n')) {

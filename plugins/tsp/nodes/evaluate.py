@@ -1,28 +1,27 @@
 """TSP node: Evaluate and summarize tour quality."""
 import numpy as np
-from pipestudio.plugin_api import node, Port, logger
+from pipestudio.plugin_api import logger
+
+NODE_INFO = {
+    "type": "tsp_evaluate",
+    "label": "Evaluate Tour",
+    "category": "EVALUATION",
+    "description": "Evaluate and summarize TSP tour quality",
+    "doc": "Computes tour length, average/longest/shortest edge statistics.",
+    "ports_in": [
+        {"name": "dist_matrix", "type": "ARRAY"},
+        {"name": "tour", "type": "ARRAY"},
+    ],
+    "ports_out": [
+        {"name": "tour_length", "type": "NUMBER"},
+        {"name": "avg_edge", "type": "NUMBER"},
+        {"name": "longest_edge", "type": "NUMBER"},
+        {"name": "shortest_edge", "type": "NUMBER"},
+    ],
+}
 
 
-@node(
-    type="tsp_evaluate",
-    label="Evaluate Tour",
-    category="EVALUATION",
-    description="Evaluate and summarize TSP tour quality",
-    doc="Computes tour length, average/longest/shortest edge statistics.",
-    ports_in=[
-        Port("dist_matrix", "ARRAY"),
-        Port("tour", "ARRAY"),
-    ],
-    ports_out=[
-        Port("tour_length", "NUMBER"),
-        Port("avg_edge", "NUMBER"),
-        Port("longest_edge", "NUMBER"),
-        Port("shortest_edge", "NUMBER"),
-    ],
-)
-def tsp_evaluate(params, **inputs):
-    dist_matrix = inputs["dist_matrix"]
-    tour = inputs["tour"]
+def run(dist_matrix, tour):
     n = len(tour)
 
     edge_lengths = np.array([
@@ -34,9 +33,4 @@ def tsp_evaluate(params, **inputs):
     shortest = float(np.min(edge_lengths))
 
     logger.info(f"Length={total:.2f}, avg={avg:.2f}, max={longest:.2f}, min={shortest:.2f}")
-    return {
-        "tour_length": total,
-        "avg_edge": avg,
-        "longest_edge": longest,
-        "shortest_edge": shortest,
-    }
+    return total, avg, longest, shortest

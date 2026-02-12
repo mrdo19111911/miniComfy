@@ -1,0 +1,9 @@
+{
+    "name": "core",
+    "version": "1.0.0",
+    "description": "Core flow-control nodes: loops, branching, and other control structures",
+    "author": "PipeStudio",
+    "categories": {
+        "CONTROL": {"color": "#6366F1", "label": "Control"}
+    }
+}

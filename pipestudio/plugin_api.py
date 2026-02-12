@@ -1,82 +1,62 @@
 """Public API for PipeStudio plugin developers.
 
 Plugin authors only need to import from this module:
-    from pipestudio.plugin_api import node, Port, logger
+    from pipestudio.plugin_api import logger
 """
-from dataclasses import dataclass
-from typing import Any, Callable, List, Optional
+import warnings
+from typing import Callable, Optional
 
 
-# --- Port definition ---
-
-@dataclass
-class Port:
-    """Defines an input or output port on a node."""
-    name: str
-    type: str  # "ARRAY", "NUMBER", "STRING", etc.
-    required: bool = True
-    default: Any = None
-
-    def __post_init__(self):
-        if self.default is not None:
-            self.required = False
-
-
-# --- Node registry (filled by @node decorator) ---
+# --- Node registry (filled by plugin loader via register_node) ---
 
 _NODE_REGISTRY: dict = {}
 _EXECUTORS: dict = {}
 
 
-def node(
-    type: str,
-    label: str,
-    category: str,
-    description: str = "",
-    doc: str = "",
-    ports_in: List[Port] = None,
-    ports_out: List[Port] = None,
-    mode: str = "python",
-):
-    """Decorator to register a function as a PipeStudio node.
+def register_node(node_info: dict, executor_fn: Callable = None) -> None:
+    """Register a node from a NODE_INFO dict and an optional executor function.
 
-    Usage:
-        @node(
-            type="my_node",
-            label="My Node",
-            category="PROCESSING",
-            ports_in=[Port("input", "ARRAY")],
-            ports_out=[Port("output", "ARRAY")],
-        )
-        def my_node(params, **inputs):
-            return {"output": inputs["input"] * 2}
+    If executor_fn is None, only the spec is registered (e.g. loop_group
+    which is handled entirely by the executor engine).
     """
-    ports_in = ports_in or []
-    ports_out = ports_out or []
+    node_type = node_info["type"]
+    if node_type in _NODE_REGISTRY:
+        warnings.warn(f"Duplicate node type '{node_type}' — overwriting previous registration")
+    spec = {
+        "type": node_type,
+        "label": node_info.get("label", node_type),
+        "category": node_info.get("category", "UNCATEGORIZED"),
+        "description": node_info.get("description", ""),
+        "doc": node_info.get("doc", ""),
+        "mode": node_info.get("mode", "python"),
+        "inputs": [
+            {
+                "name": p["name"],
+                "type": p.get("type", "ANY"),
+                "required": p.get("default") is None and p.get("required", True),
+                "default": p.get("default"),
+            }
+            for p in node_info.get("ports_in", [])
+        ],
+        "outputs": [
+            {
+                "name": p["name"],
+                "type": p.get("type", "ANY"),
+                "required": True,
+                "default": None,
+            }
+            for p in node_info.get("ports_out", [])
+        ],
+    }
+    _NODE_REGISTRY[node_type] = spec
+    if executor_fn is not None:
+        _EXECUTORS[node_type] = executor_fn
 
-    def decorator(func: Callable) -> Callable:
-        spec = {
-            "type": type,
-            "label": label,
-            "category": category,
-            "description": description,
-            "doc": doc,
-            "mode": mode,
-            "inputs": [
-                {"name": p.name, "type": p.type, "required": p.required, "default": p.default}
-                for p in ports_in
-            ],
-            "outputs": [
-                {"name": p.name, "type": p.type, "required": True, "default": None}
-                for p in ports_out
-            ],
-        }
-        _NODE_REGISTRY[type] = spec
-        _EXECUTORS[type] = func
-        func._node_spec = spec
-        return func
 
-    return decorator
+def unregister_node(node_type: str) -> None:
+    """Remove a node type from registry and executors. Silent if not found."""
+    _NODE_REGISTRY.pop(node_type, None)
+    _EXECUTORS.pop(node_type, None)
 
 
 def get_registry() -> dict:

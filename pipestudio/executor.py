@@ -11,8 +11,16 @@ from typing import Any, Callable, Dict, List, Optional, Set
 
 import numpy as np
 
-from pipestudio.models import WorkflowDefinition, WorkflowEdge, WorkflowNode
+from pipestudio.models import WorkflowDefinition, WorkflowEdge, WorkflowNode, NodeUnavailableError
 from pipestudio.plugin_api import get_executors, logger as node_logger
+
+
+MAX_ITERATIONS = 10000
+
+
+def _clamp_iterations(raw) -> int:
+    """Clamp iterations to [1, MAX_ITERATIONS]."""
+    return max(1, min(int(raw), MAX_ITERATIONS))
 
 
 class WorkflowExecutor:
@@ -94,7 +102,7 @@ class WorkflowExecutor:
 
     def _execute_loop_group(self, node_def: WorkflowNode, inputs: Dict[str, Any]) -> Dict[str, Any]:
         """Execute child nodes N times, passing output as input each iteration."""
-        iterations = int(node_def.params.get("iterations", 10))
+        iterations = _clamp_iterations(node_def.params.get("iterations", 10))
         all_edges = self.workflow.edges
 
         child_nodes = [n for n in self.workflow.nodes if n.parent_id == node_def.id]
@@ -207,7 +215,7 @@ class WorkflowExecutor:
         if not end_node:
             raise ValueError(f"LoopStart '{pair_id}' has no paired LoopEnd (set pair_id param)")
 
-        iterations = int(start_node.params.get("iterations", 10))
+        iterations = _clamp_iterations(start_node.params.get("iterations", 10))
 
         # Find loop body: all nodes from start to end
         body_ids = self._find_loop_body(start_node.id, end_node.id)
@@ -288,7 +296,7 @@ class WorkflowExecutor:
 
     def _execute_n8n_loop(self, loop_def: WorkflowNode) -> Set[str]:
         """Execute an n8n-style loop node. Returns set of chain node IDs already executed."""
-        iterations = int(loop_def.params.get("iterations", 10))
+        iterations = _clamp_iterations(loop_def.params.get("iterations", 10))
 
         forward_edges = [e for e in self.workflow.edges if not e.is_back_edge]
         back_edges = [e for e in self.workflow.edges if e.is_back_edge]
@@ -477,6 +485,13 @@ class WorkflowExecutor:
                     continue
 
                 else:
+                    # Check node type is available before executing
+                    if node_def.type not in self.executors:
+                        raise NodeUnavailableError(
+                            node_id=node_id,
+                            node_type=node_def.type,
+                            reason="inactive or not installed",
+                        )
                     # Normal node execution
                     node_logger._set_context(node_id, node_def.type, self._log_handler)
                     try:

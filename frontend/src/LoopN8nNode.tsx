@@ -25,7 +25,6 @@ function LoopN8nNodeInner({ id, data, selected }: NodeProps) {
   // Split ports into groups
   const initPorts = allInputs.filter((p: PortSpec) => p.name.startsWith('init_'));
   const feedbackPorts = allInputs.filter((p: PortSpec) => p.name.startsWith('feedback_'));
-  const configPorts = allInputs.filter((p: PortSpec) => p.type === 'NUMBER');
   const loopPorts = allOutputs.filter((p: PortSpec) => p.name.startsWith('loop_'));
   const donePorts = allOutputs.filter((p: PortSpec) => p.name.startsWith('done_'));
 
@@ -40,7 +39,7 @@ function LoopN8nNodeInner({ id, data, selected }: NodeProps) {
     (name: string, val: number) => {
       if (data.onConfigChange) data.onConfigChange(id, name, val);
     },
-    [id, data],
+    [id, data.onConfigChange],
   );
 
   return (
@@ -111,8 +110,8 @@ function LoopN8nNodeInner({ id, data, selected }: NodeProps) {
               cursor: 'pointer', padding: '0 2px', fontSize: 16, lineHeight: 1,
               display: 'flex', alignItems: 'center', marginLeft: 2,
             }}
-            onMouseEnter={(e) => { (e.target as HTMLElement).style.color = '#fff'; }}
-            onMouseLeave={(e) => { (e.target as HTMLElement).style.color = 'rgba(255,255,255,0.5)'; }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = '#fff'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = 'rgba(255,255,255,0.5)'; }}
             title="Delete node"
           >×</button>
         </div>

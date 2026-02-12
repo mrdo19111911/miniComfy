@@ -14,13 +14,14 @@ def main():
     def open_browser():
         import time
         time.sleep(1.5)
-        webbrowser.open("http://localhost:8500")
+        webbrowser.open("http://localhost:5173")
 
     threading.Thread(target=open_browser, daemon=True).start()
 
     print("=" * 50)
     print("  PipeStudio v1.0")
-    print("  http://localhost:8500")
+    print("  Frontend: http://localhost:5173")
+    print("  API Docs: http://localhost:8500/docs")
     print("=" * 50)
 
     uvicorn.run("pipestudio.server:app", host="127.0.0.1", port=8500, reload=True)

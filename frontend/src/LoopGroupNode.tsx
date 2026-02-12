@@ -37,7 +37,7 @@ function LoopGroupNodeInner({ id, data, selected }: NodeProps) {
         data.onConfigChange(id, 'iterations', val);
       }
     },
-    [id, data],
+    [id, data.onConfigChange],
   );
 
   const handleParamChange = useCallback(
@@ -46,7 +46,7 @@ function LoopGroupNodeInner({ id, data, selected }: NodeProps) {
         data.onConfigChange(id, name, val);
       }
     },
-    [id, data],
+    [id, data.onConfigChange],
   );
 
   return (
@@ -173,8 +173,8 @@ function LoopGroupNodeInner({ id, data, selected }: NodeProps) {
               alignItems: 'center',
               marginLeft: 4,
             }}
-            onMouseEnter={(e) => { (e.target as HTMLElement).style.color = '#fff'; }}
-            onMouseLeave={(e) => { (e.target as HTMLElement).style.color = 'rgba(255,255,255,0.5)'; }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = '#fff'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = 'rgba(255,255,255,0.5)'; }}
             title="Delete loop group"
           >
             ×

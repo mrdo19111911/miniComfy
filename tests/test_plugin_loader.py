@@ -1,4 +1,4 @@
-"""Tests for plugin loader and sorting plugin."""
+"""Tests for plugin loader and TSP plugin."""
 import sys
 import os
 
@@ -18,18 +18,21 @@ def _fresh_load():
     return load_plugins(PLUGINS_DIR)
 
 
-def test_sorting_plugin_loads():
+def test_tsp_plugin_loads():
     manifests = _fresh_load()
     assert len(manifests) >= 1
-    sorting = [m for m in manifests if m.get("name") == "sorting"]
-    assert len(sorting) == 1
-    assert sorting[0]["_loaded"] is True
+    tsp = [m for m in manifests if m.get("name") == "tsp"]
+    assert len(tsp) == 1
+    assert tsp[0]["_loaded"] is True
 
 
-def test_sorting_plugin_has_all_nodes():
+def test_tsp_plugin_has_all_nodes():
     _fresh_load()
-    expected = {"generate_array", "shuffle_segment", "reverse_segment",
-                "partial_sort", "bubble_pass", "measure_disorder", "loop_group"}
+    expected = {
+        "tsp_generate_points", "tsp_distance_matrix", "tsp_greedy",
+        "tsp_2opt", "tsp_evaluate", "tsp_log_tour",
+        "tsp_map_visualize", "tsp_view_text", "loop_group",
+    }
     assert expected.issubset(set(_NODE_REGISTRY.keys()))
 
 
@@ -46,29 +49,33 @@ def test_all_non_control_nodes_have_executors():
             assert node_type in _EXECUTORS, f"{node_type} missing executor"
 
 
-def test_generate_array_executor():
+def test_generate_points_executor():
     _fresh_load()
-    result = _EXECUTORS["generate_array"]({"size": 100})
-    assert "array" in result
-    assert len(result["array"]) == 100
+    result = _EXECUTORS["tsp_generate_points"]({"num_points": 20})
+    assert "points" in result
+    assert result["points"].shape == (20, 2)
 
 
-def test_bubble_pass_executor():
+def test_greedy_executor():
     import numpy as np
     _fresh_load()
-    arr = np.array([3, 1, 2, 5, 4])
-    result = _EXECUTORS["bubble_pass"]({}, array=arr)
-    assert "array" in result
-    # After one bubble pass: [1, 2, 3, 4, 5]
-    assert list(result["array"]) == [1, 2, 3, 4, 5]
+    points = np.array([[0, 0], [1, 0], [0, 1]], dtype=float)
+    diff = points[:, np.newaxis, :] - points[np.newaxis, :, :]
+    dm = np.sqrt(np.sum(diff ** 2, axis=2))
+    result = _EXECUTORS["tsp_greedy"]({}, dist_matrix=dm)
+    assert "tour" in result
+    assert "tour_length" in result
+    assert len(result["tour"]) == 3
 
 
-def test_measure_disorder_executor():
+def test_evaluate_executor():
     import numpy as np
     _fresh_load()
-    sorted_arr = np.arange(100)
-    result = _EXECUTORS["measure_disorder"]({}, array=sorted_arr)
-    assert result["score"] == 1.0
+    dm = np.array([[0, 1, 2], [1, 0, 1.5], [2, 1.5, 0]], dtype=float)
+    tour = np.array([0, 1, 2])
+    result = _EXECUTORS["tsp_evaluate"]({}, dist_matrix=dm, tour=tour)
+    assert "tour_length" in result
+    assert result["tour_length"] > 0
 
 
 def test_node_spec_has_required_fields():

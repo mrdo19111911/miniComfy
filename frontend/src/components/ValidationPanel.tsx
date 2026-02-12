@@ -14,6 +14,8 @@ export interface ValidationPanelProps {
   issues: ValidationIssue[];
   onValidate: () => void;
   onHighlightNode?: (nodeId: string) => void;
+  onRemoveBrokenNodes?: () => void;
+  hasBrokenNodes?: boolean;
   visible: boolean;
 }
 
@@ -30,6 +32,8 @@ export function ValidationPanel({
   issues,
   onValidate,
   onHighlightNode,
+  onRemoveBrokenNodes,
+  hasBrokenNodes,
   visible,
 }: ValidationPanelProps) {
   const counts = useMemo(() => {
@@ -97,6 +101,16 @@ export function ValidationPanel({
         )}
 
         <span style={{ flex: 1 }} />
+
+        {/* Remove broken nodes button */}
+        {hasBrokenNodes && onRemoveBrokenNodes && (
+          <button
+            onClick={onRemoveBrokenNodes}
+            style={{ ...toolBtnStyle, color: '#EF4444', borderColor: '#EF4444' }}
+          >
+            Remove broken nodes
+          </button>
+        )}
 
         {/* Validate button */}
         <button onClick={onValidate} style={toolBtnStyle}>

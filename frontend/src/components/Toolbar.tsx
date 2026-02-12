@@ -17,7 +17,6 @@ export interface ToolbarProps {
   onLoadExample: (filename: string) => void;
   onToggleLog: () => void;
   onToggleValidation: () => void;
-  onValidate: () => void;
   onUndo: () => void;
   onRedo: () => void;
   onOpenPlugins: () => void;
@@ -29,7 +28,6 @@ export interface ToolbarProps {
   validationVisible: boolean;
   validationErrors: number;
   logCount: number;
-  connected: boolean;
   executionResult: string | null;
 }
 
@@ -41,7 +39,6 @@ export function Toolbar({
   onLoadExample,
   onToggleLog,
   onToggleValidation,
-  onValidate,
   onUndo,
   onRedo,
   onOpenPlugins,
@@ -53,7 +50,6 @@ export function Toolbar({
   validationVisible,
   validationErrors,
   logCount,
-  connected,
   executionResult,
 }: ToolbarProps) {
   const [examples, setExamples] = useState<ExampleEntry[]>([]);

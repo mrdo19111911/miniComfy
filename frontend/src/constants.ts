@@ -26,6 +26,31 @@ export const categoryColor = (cat: string): string =>
   CATEGORY_COLORS[cat] ?? '#6B7280';
 
 // ---------------------------------------------------------------------------
+// Node visual state styles (plugin lifecycle)
+// ---------------------------------------------------------------------------
+
+export const NODE_STATE_STYLES = {
+  disabled: {
+    borderColor: '#666',
+    borderStyle: 'dashed' as const,
+    opacity: 0.5,
+    badgeText: 'INACTIVE',
+    badgeColor: '#FBBF24',
+    badgeBg: 'rgba(0,0,0,0.4)',
+    headerColor: '#555',
+  },
+  broken: {
+    borderColor: '#EF4444',
+    borderStyle: 'dashed' as const,
+    opacity: 0.6,
+    badgeText: 'MISSING',
+    badgeColor: '#EF4444',
+    badgeBg: 'rgba(127,29,29,0.6)',
+    headerColor: '#7F1D1D',
+  },
+} as const;
+
+// ---------------------------------------------------------------------------
 // Port handle colors
 // ---------------------------------------------------------------------------
 
@@ -193,15 +218,15 @@ export async function fetchNodeRegistry(): Promise<PaletteNode[]> {
   try {
     const res = await fetch(`${API_BASE}/api/workflow/nodes`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const registry: Record<string, any> = await res.json();
-    return Object.values(registry).map((spec: any) => ({
-      type: spec.type,
-      label: spec.label,
-      category: spec.category,
-      description: spec.description || '',
-      doc: spec.doc || '',
-      inputs: spec.inputs || [],
-      outputs: spec.outputs || [],
+    const registry: Record<string, Record<string, unknown>> = await res.json();
+    return Object.values(registry).map((spec) => ({
+      type: spec.type as string,
+      label: spec.label as string,
+      category: spec.category as string,
+      description: (spec.description as string) || '',
+      doc: (spec.doc as string) || '',
+      inputs: (spec.inputs as PaletteNode['inputs']) || [],
+      outputs: (spec.outputs as PaletteNode['outputs']) || [],
     }));
   } catch (err) {
     console.warn('Failed to fetch node registry, using fallback:', err);

@@ -39,30 +39,30 @@ def test_nodes_endpoint(client):
     resp = client.get("/api/workflow/nodes")
     assert resp.status_code == 200
     data = resp.json()
-    assert "generate_array" in data
-    assert "bubble_pass" in data
-    assert data["generate_array"]["category"] == "INPUT"
+    assert "tsp_generate_points" in data
+    assert "tsp_greedy" in data
+    assert data["tsp_generate_points"]["category"] == "INPUT"
 
 
 def test_execute_simple_workflow(client):
-    """Execute a simple generate -> measure workflow via REST."""
+    """Execute a simple generate -> distance_matrix workflow via REST."""
     payload = {
         "name": "test",
         "nodes": [
-            {"id": "gen", "type": "generate_array", "params": {"size": 50}},
-            {"id": "meas", "type": "measure_disorder"},
+            {"id": "gen", "type": "tsp_generate_points", "params": {"num_points": 10}},
+            {"id": "dm", "type": "tsp_distance_matrix"},
         ],
         "edges": [
-            {"id": "e1", "source": "gen", "source_port": "array",
-             "target": "meas", "target_port": "array"},
+            {"id": "e1", "source": "gen", "source_port": "points",
+             "target": "dm", "target_port": "points"},
         ],
     }
     resp = client.post("/api/workflow/execute", json=payload)
     assert resp.status_code == 200
     data = resp.json()
     assert "gen" in data
-    assert "meas" in data
-    assert "score" in data["meas"]
+    assert "dm" in data
+    assert "dist_matrix" in data["dm"]
 
 
 def test_websocket_connects_and_disconnects(client):
@@ -86,12 +86,12 @@ def test_execution_emits_events():
     wf = WorkflowDefinition(
         name="test",
         nodes=[
-            WorkflowNode(id="gen", type="generate_array", params={"size": 10}),
-            WorkflowNode(id="meas", type="measure_disorder"),
+            WorkflowNode(id="gen", type="tsp_generate_points", params={"num_points": 10}),
+            WorkflowNode(id="dm", type="tsp_distance_matrix"),
         ],
         edges=[
-            WorkflowEdge(id="e1", source="gen", source_port="array",
-                         target="meas", target_port="array"),
+            WorkflowEdge(id="e1", source="gen", source_port="points",
+                         target="dm", target_port="points"),
         ],
     )
     WorkflowExecutor(wf, event_handler=handler).execute()
@@ -105,7 +105,7 @@ def test_execution_emits_events():
     # Check log events from plugin logger
     assert "log" in event_types
     log_events = [e for e in events if e["event"] == "log"]
-    assert any("elements" in e.get("message", "") for e in log_events)
+    assert len(log_events) > 0
 
     # Check complete event has total_ms
     complete_evt = [e for e in events if e["event"] == "complete"][0]
@@ -124,7 +124,7 @@ def test_execution_events_include_duration():
 
     wf = WorkflowDefinition(
         name="test",
-        nodes=[WorkflowNode(id="gen", type="generate_array", params={"size": 10})],
+        nodes=[WorkflowNode(id="gen", type="tsp_generate_points", params={"num_points": 10})],
         edges=[],
     )
     WorkflowExecutor(wf, event_handler=handler).execute()
@@ -140,18 +140,18 @@ def test_examples_endpoint(client):
     resp = client.get("/api/workflow/examples")
     assert resp.status_code == 200
     data = resp.json()
-    assert len(data) >= 2
+    assert len(data) >= 1
     names = [e["filename"] for e in data]
-    assert "sorting_basic.json" in names
+    assert "tsp_basic.json" in names
 
 
 def test_load_example(client):
     """Load a specific example workflow."""
-    resp = client.get("/api/workflow/example/sorting_basic.json")
+    resp = client.get("/api/workflow/example/tsp_basic.json")
     assert resp.status_code == 200
     data = resp.json()
-    assert data["name"] == "Basic Sorting Demo"
-    assert len(data["nodes"]) == 4
+    assert data["name"] == "TSP Pipeline (100 Points)"
+    assert len(data["nodes"]) == 6
 
 
 def test_load_example_not_found(client):
@@ -172,6 +172,6 @@ def test_plugins_endpoint(client):
     assert resp.status_code == 200
     data = resp.json()
     assert len(data) >= 1
-    sorting = [p for p in data if p["name"] == "sorting"]
-    assert len(sorting) == 1
-    assert sorting[0]["status"] == "ok"
+    tsp = [p for p in data if p["project"] == "tsp"]
+    assert len(tsp) == 1
+    assert tsp[0]["status"] == "ok"

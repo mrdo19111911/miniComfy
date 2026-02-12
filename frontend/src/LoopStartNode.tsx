@@ -9,7 +9,6 @@ import type { PortSpec } from './types';
 import { portColor } from './constants';
 
 function LoopStartNodeInner({ id, data, selected }: NodeProps) {
-  const iterations = data.config?.iterations ?? 10;
   const status: string = data.status ?? 'idle';
   const inputs: PortSpec[] = (data.inputs ?? []).filter((p: PortSpec) => p.type !== 'NUMBER');
   const outputs: PortSpec[] = data.outputs ?? [];
@@ -26,7 +25,7 @@ function LoopStartNodeInner({ id, data, selected }: NodeProps) {
     (name: string, val: number) => {
       if (data.onConfigChange) data.onConfigChange(id, name, val);
     },
-    [id, data],
+    [id, data.onConfigChange],
   );
 
   return (
@@ -83,8 +82,8 @@ function LoopStartNodeInner({ id, data, selected }: NodeProps) {
             cursor: 'pointer', padding: '0 2px', fontSize: 16, lineHeight: 1,
             display: 'flex', alignItems: 'center',
           }}
-          onMouseEnter={(e) => { (e.target as HTMLElement).style.color = '#fff'; }}
-          onMouseLeave={(e) => { (e.target as HTMLElement).style.color = 'rgba(255,255,255,0.5)'; }}
+          onMouseEnter={(e) => { e.currentTarget.style.color = '#fff'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.color = 'rgba(255,255,255,0.5)'; }}
           title="Delete node"
         >×</button>
       </div>

@@ -25,3 +25,15 @@ class WorkflowDefinition(BaseModel):
     name: str = "workflow"
     nodes: List[WorkflowNode] = []
     edges: List[WorkflowEdge] = []
+
+
+class NodeUnavailableError(Exception):
+    """Raised when executor encounters a node whose plugin is inactive or not installed."""
+
+    def __init__(self, node_id: str, node_type: str, reason: str):
+        self.node_id = node_id
+        self.node_type = node_type
+        self.reason = reason
+        super().__init__(
+            f"Node '{node_id}' uses type '{node_type}' which is {reason}"
+        )

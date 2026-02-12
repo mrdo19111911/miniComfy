@@ -1,26 +1,25 @@
 """TSP node: Map visualization — outputs SVG of points and tour."""
 import numpy as np
-from pipestudio.plugin_api import node, Port, logger
+from pipestudio.plugin_api import logger
+
+NODE_INFO = {
+    "type": "tsp_map_visualize",
+    "label": "Map Visualize",
+    "category": "EVALUATION",
+    "description": "Generate SVG map of points and tour route",
+    "doc": "Creates an SVG visualization showing all points and the tour path. Output is an SVG string viewable in the result panel.",
+    "ports_in": [
+        {"name": "points", "type": "ARRAY"},
+        {"name": "tour", "type": "ARRAY"},
+    ],
+    "ports_out": [
+        {"name": "svg", "type": "STRING"},
+        {"name": "tour_length", "type": "NUMBER"},
+    ],
+}
 
 
-@node(
-    type="tsp_map_visualize",
-    label="Map Visualize",
-    category="EVALUATION",
-    description="Generate SVG map of points and tour route",
-    doc="Creates an SVG visualization showing all points and the tour path. Output is an SVG string viewable in the result panel.",
-    ports_in=[
-        Port("points", "ARRAY"),
-        Port("tour", "ARRAY"),
-    ],
-    ports_out=[
-        Port("svg", "STRING"),
-        Port("tour_length", "NUMBER"),
-    ],
-)
-def tsp_map_visualize(params, **inputs):
-    points = inputs["points"]
-    tour = inputs["tour"]
+def run(points, tour):
     n = len(tour)
 
     # Compute tour length
@@ -94,7 +93,4 @@ def tsp_map_visualize(params, **inputs):
     svg = "\n".join(lines)
 
     logger.info(f"Map: {n} cities, tour={total:.2f}")
-    return {
-        "svg": svg,
-        "tour_length": total,
-    }
+    return svg, total

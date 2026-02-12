@@ -1,26 +1,24 @@
 """TSP node: Log tour details on demand."""
-import numpy as np
-from pipestudio.plugin_api import node, Port, logger
+from pipestudio.plugin_api import logger
+
+NODE_INFO = {
+    "type": "tsp_log_tour",
+    "label": "Log Tour",
+    "category": "UTILITY",
+    "description": "Print tour sequence and per-edge distances to log",
+    "doc": "Logs the full tour order and each edge distance. Connect when you need to inspect the tour details.",
+    "ports_in": [
+        {"name": "tour", "type": "ARRAY"},
+        {"name": "dist_matrix", "type": "ARRAY"},
+    ],
+    "ports_out": [
+        {"name": "tour", "type": "ARRAY"},
+        {"name": "tour_length", "type": "NUMBER"},
+    ],
+}
 
 
-@node(
-    type="tsp_log_tour",
-    label="Log Tour",
-    category="UTILITY",
-    description="Print tour sequence and per-edge distances to log",
-    doc="Logs the full tour order and each edge distance. Connect when you need to inspect the tour details.",
-    ports_in=[
-        Port("tour", "ARRAY"),
-        Port("dist_matrix", "ARRAY"),
-    ],
-    ports_out=[
-        Port("tour", "ARRAY"),
-        Port("tour_length", "NUMBER"),
-    ],
-)
-def tsp_log_tour(params, **inputs):
-    tour = inputs["tour"]
-    dist_matrix = inputs["dist_matrix"]
+def run(tour, dist_matrix):
     n = len(tour)
 
     edges = []
@@ -39,7 +37,4 @@ def tsp_log_tour(params, **inputs):
     for i in range(0, len(edges), chunk):
         logger.info("\n".join(edges[i:i + chunk]))
 
-    return {
-        "tour": tour,
-        "tour_length": total,
-    }
+    return tour, total

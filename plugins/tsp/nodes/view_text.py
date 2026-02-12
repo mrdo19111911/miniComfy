@@ -1,6 +1,22 @@
 """TSP node: View any data as text."""
 import numpy as np
-from pipestudio.plugin_api import node, Port, logger
+from pipestudio.plugin_api import logger
+
+NODE_INFO = {
+    "type": "tsp_view_text",
+    "label": "View Text",
+    "category": "UTILITY",
+    "description": "Display any connected data as text",
+    "doc": "Connect any port(s) to view contents. Has multiple input slots for arrays, numbers, and text.",
+    "ports_in": [
+        {"name": "data_1", "type": "ARRAY", "required": False},
+        {"name": "data_2", "type": "ARRAY", "required": False},
+        {"name": "value_1", "type": "NUMBER", "required": False},
+        {"name": "value_2", "type": "NUMBER", "required": False},
+        {"name": "text_in", "type": "STRING", "required": False},
+    ],
+    "ports_out": [{"name": "text", "type": "STRING"}],
+}
 
 
 def _format_value(key, val):
@@ -31,28 +47,23 @@ def _format_value(key, val):
     return lines
 
 
-@node(
-    type="tsp_view_text",
-    label="View Text",
-    category="UTILITY",
-    description="Display any connected data as text",
-    doc="Connect any port(s) to view contents. Has multiple input slots for arrays, numbers, and text.",
-    ports_in=[
-        Port("data_1", "ARRAY", required=False),
-        Port("data_2", "ARRAY", required=False),
-        Port("value_1", "NUMBER", required=False),
-        Port("value_2", "NUMBER", required=False),
-        Port("text_in", "STRING", required=False),
-    ],
-    ports_out=[
-        Port("text", "STRING"),
-    ],
-)
-def tsp_view_text(params, **inputs):
+def run(data_1=None, data_2=None, value_1=None, value_2=None, text_in=None):
+    inputs = {}
+    if data_1 is not None:
+        inputs["data_1"] = data_1
+    if data_2 is not None:
+        inputs["data_2"] = data_2
+    if value_1 is not None:
+        inputs["value_1"] = value_1
+    if value_2 is not None:
+        inputs["value_2"] = value_2
+    if text_in is not None:
+        inputs["text_in"] = text_in
+
     lines = []
     for key in sorted(inputs.keys()):
         lines.extend(_format_value(key, inputs[key]))
 
     text = "\n".join(lines) if lines else "(no inputs connected)"
     logger.info(text)
-    return {"text": text}
+    return text
