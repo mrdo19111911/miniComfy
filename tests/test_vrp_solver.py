@@ -107,3 +107,36 @@ def test_greedy_construction_respects_capacity():
             node = int(route_nodes[r, pos])
             total_demand += customers[node, 2]
         assert total_demand <= fleet["capacity_weight"][r]
+
+
+# --- Route Map ---
+
+def test_route_map_registered():
+    assert "vrp_route_map" in _NODE_REGISTRY
+
+
+def test_route_map_produces_svg():
+    assembled, customers, fleet = _make_simple_problem()
+    solver = _EXECUTORS["vrp_greedy_construction"]
+    sol = solver(
+        {},
+        check_route=assembled["check_route"],
+        compute_cost=assembled["compute_cost"],
+        data=assembled["data"],
+        fleet=fleet,
+        customers=customers,
+    )
+
+    viz = _EXECUTORS["vrp_route_map"]
+    result = viz(
+        {},
+        customers=customers,
+        route_nodes=sol["route_nodes"],
+        route_len=sol["route_len"],
+        fleet=fleet,
+    )
+
+    svg = result["svg"]
+    assert isinstance(svg, str)
+    assert "<svg" in svg
+    assert "</svg>" in svg
