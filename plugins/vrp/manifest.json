@@ -1,0 +1,16 @@
+{
+    "name": "vrp",
+    "version": "0.1.0",
+    "description": "Vehicle Routing Problem solver with modular constraints and ALNS optimization",
+    "author": "PipeStudio",
+    "categories": {
+        "DATA": {"color": "#2563EB", "label": "Data"},
+        "FLEET": {"color": "#0891B2", "label": "Fleet"},
+        "CONSTRAINT": {"color": "#D97706", "label": "Constraint"},
+        "ASSEMBLER": {"color": "#7C3AED", "label": "Assembler"},
+        "DESTROY": {"color": "#DC2626", "label": "Destroy"},
+        "REPAIR": {"color": "#10B981", "label": "Repair"},
+        "SOLVER": {"color": "#8B5CF6", "label": "Solver"},
+        "OUTPUT": {"color": "#6B7280", "label": "Output"}
+    }
+}
